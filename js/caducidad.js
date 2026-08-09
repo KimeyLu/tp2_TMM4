@@ -206,12 +206,13 @@ const Caducidad = (p) => {
       if (arrastrando) {
         verificarToqueYDanio();
 
+        //LINEA del TRIANGULO
         const centroX = triX;
         const centroY = (triY + (triY + TRI_ABAJO) + (triY + TRI_ABAJO)) / 3;
         p.push();
           p.stroke(18, 18, 18);
           p.strokeWeight(2);
-          p.line(centroX, centroY, p.width / 2, 0);
+          p.line(centroX, centroY, p.width / 2, -p.height/2);
         p.pop();
       }
 
@@ -221,13 +222,12 @@ const Caducidad = (p) => {
         p.fill(0, 0, 0, 0);
         p.stroke(30, 30, 30);
         p.strokeWeight(4);
-        p.rect(70, -10, 260, 40);
-        p.rect(80, -10, 240, 30);
-        p.rect(90, -10, 220, 20);
+        p.rect(70, -60, 260, 10);
+        p.rect(90, -80, 220, 10);
 
-        p.rect(70, 375, 260, 30);
-        p.rect(80, 385, 240, 30);
-        p.rect(90, 395, 220, 30);
+        
+        p.rect(80, p.height+50, 240, 10);
+        p.rect(90, p.height+40, 220, 30);
       p.pop();
     p.pop();
   };
