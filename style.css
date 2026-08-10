@@ -56,3 +56,14 @@
     width: auto !important;
     height: 30vh !important; /* mantiene la proporción */
 }
+
+#incertidumbre canvas {
+    width: auto !important;
+    height: 30vh !important; /* mantiene la proporción */
+}
+
+#expectativa canvas {
+    width: auto !important;
+    height: 30vh !important; /* mantiene la proporción */
+}
+
