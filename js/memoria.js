@@ -226,25 +226,25 @@ const Memoria = (p) => {
         p.pop();
       } else if (this.lastType === 2) {
         p.triangle(
-          0, -this.size / 2,
-          -this.size / 2, this.size / 2,
-          this.size / 2, this.size / 2
+          0, -this.size / 1.5,
+          -this.size / 2, this.size / 3,
+          this.size / 2, this.size / 3
         );
         p.push();
           p.noStroke();
           p.fill('#970510');
           p.triangle(
-            0, -this.size / 5,
-            -this.size / 4.2, this.size / 3.2,
-            this.size / 4.2, this.size / 3.2
+            0, -this.size / 2.9,
+            -this.size / 4.2, this.size / 5.4,
+            this.size / 4.2, this.size / 5.4
           );
           p.push();
             p.strokeWeight(3);
             p.stroke(this.lastColor);
             p.triangle(
-              0, -this.size / 8,
-              -this.size / 5.2, this.size / 3.5,
-              this.size / 5.2, this.size / 3.5
+              0, -this.size / 4,
+              -this.size / 5.2, this.size / 6.5,
+              this.size / 5.2, this.size / 6.5
             );
           p.pop();
         p.pop();
