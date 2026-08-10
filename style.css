@@ -67,3 +67,7 @@
     height: 30vh !important; /* mantiene la proporción */
 }
 
+#ansiedad canvas {
+    width: auto !important;
+    height: 30vh !important; /* mantiene la proporción */
+}
