@@ -613,7 +613,7 @@ const sketchIncertidumbre = (p) => {
     };
 
     p.draw = () => {
-        p.background(...COLOR_BG);
+        p.background("#141414");
 
         if (gameOver) {
             world.draw(cam.x, cam.y);
