@@ -1,7 +1,7 @@
 const sketchAnsiedad = (p) => {
   const BG = '#141414';
   const CREAM = '#EFD583';
-  const RED = '#970511';
+  const RED = '#D73E34';
 
   const FOLLOW_SPEED = 0.08;
   const TRIANGLE_OFFSET_FACTOR = 1.6;
@@ -32,7 +32,7 @@ const sketchAnsiedad = (p) => {
     cx = p.width / 2;
     cy = p.height / 2;
     DIAMOND_R = p.min(p.width, p.height) * 0.22;
-    MAIN_R = DIAMOND_R * 0.3;
+    MAIN_R = DIAMOND_R * 0.18;
     SAT_R_MIN = DIAMOND_R * 0.12;
     SAT_R_MAX = DIAMOND_R * 0.18;
   }
@@ -111,7 +111,7 @@ const sketchAnsiedad = (p) => {
 
   function drawSatellites(jitterAmp) {
     p.noStroke();
-    p.fill(RED);
+    p.fill(CREAM);
     for (const s of satellites) {
       const jx = p.random(-jitterAmp, jitterAmp);
       const jy = p.random(-jitterAmp, jitterAmp);
@@ -126,9 +126,34 @@ const sketchAnsiedad = (p) => {
   function drawMainCircle(jitterAmp) {
     const jx = p.random(-jitterAmp, jitterAmp);
     const jy = p.random(-jitterAmp, jitterAmp);
+    const px = mainCircle.x + jx;
+    const py = mainCircle.y + jy;
+
+    drawConnector(px, py);
+
     p.noStroke();
-    p.fill(CREAM);
-    p.circle(mainCircle.x + jx, mainCircle.y + jy, MAIN_R * 2);
+    p.fill(RED);
+    p.circle(px, py, MAIN_R * 2);
+  }
+
+  function drawConnector(px, py) {
+    // punto más cercano en el borde del rombo, proyectando desde el centro
+    let dx = px - cx, dy = py - cy;
+    const L = Math.abs(dx) + Math.abs(dy);
+    let ex = cx, ey = cy + DIAMOND_R;
+    if (L > 0) {
+      const s = DIAMOND_R / L;
+      ex = cx + dx * s;
+      ey = cy + dy * s;
+    }
+
+    p.stroke(RED);
+    p.strokeWeight(2);
+    p.line(px, py, ex, ey);
+
+    p.noStroke();
+    p.fill(RED);
+    p.circle(ex, ey, MAIN_R * 0.5);
   }
 
   function handleTouchDown(x, y) {
