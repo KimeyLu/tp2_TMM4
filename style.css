@@ -1,73 +1,109 @@
+html, body {
+    margin: 0;
+    height: 100%;
+    background: #141414;
+    overflow: hidden; /* que nunca haga scroll, sea cual sea la altura */
+}
+
 .container {
-    gap: 1vh;
+    display: flex;
+    box-sizing: border-box;
+    height: 100vh;
+    gap: 1.6vh; /* separación entre grupos (filas), reducida para que entre todo */
+    padding: 1.2vh 2vw;
     flex-direction: column;
     justify-content: center;
-    align-items: center; 
+    align-items: center;
 }
 
 .sub_1 {
     display: flex;
     flex-direction: row;
-    gap: 1vw;
+    gap: 4vw;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
 }
 .sub_2 {
     display: flex;
     flex-direction: row;
-    gap: 1vw;
+    gap: 4vw;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
 }
 .sub_3 {
     display: flex;
     flex-direction: row;
-    gap: 1vw;
+    gap: 4vw;
     justify-content: center;
+    align-items: flex-start;
+}
+
+.item {
+    display: flex;
+    flex-direction: column;
     align-items: center;
+    gap: 0.3vh; /* pegado a su propia pieza */
+}
+
+.titulo {
+    margin: 0;
+    font-family: sans-serif;
+    font-size: 1.2vh;
+    font-weight: 600;
+    letter-spacing: 0.1vw;
+    text-transform: uppercase;
+    color: #EFD583;
+    text-align: center;
+}
+
+/* borde fino en todos los canvas para que las piezas de fondo oscuro
+   no se pierdan contra el fondo negro de la página */
+.item canvas {
+    border: 1px solid rgba(239, 213, 131, 0.3);
+    box-sizing: border-box;
 }
 
 #memoria canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #herencia canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #caducidad canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #colaboracion canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #identidad canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #empatia canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #incertidumbre canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #expectativa canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
 
 #ansiedad canvas {
     width: auto !important;
-    height: 30vh !important; /* mantiene la proporción */
+    height: 27vh !important; /* mantiene la proporción */
 }
