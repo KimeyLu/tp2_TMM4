@@ -9,6 +9,7 @@ const sketchEmpatia = (p) => {
   const CONNECT_RADIUS = 60;
   const BOND_DISTANCE = 65;
   const REPEL_MAX_PUSH = 25;
+  const DRAG_EASE = 0.22; // qué tan rápido la figura arrastrada alcanza su posición objetivo (más bajo = más suave/elástico)
   const GROW_MS = 3500;
   const DECAY_MS = 7000;
   const MAX_SPEED_MULT = 3;
@@ -65,6 +66,7 @@ const sketchEmpatia = (p) => {
         r: rad,
         x: cx, y: cy,
         homeX: cx, homeY: cy,
+        dragTargetX: cx, dragTargetY: cy, // posición cruda del dedo/mouse mientras se arrastra
         vx: 0, vy: 0,
         rot: p.random(-0.3, 0.3),
         phase: p.random(1000),
@@ -141,9 +143,16 @@ const sketchEmpatia = (p) => {
       }
 
       if (pt.dragging) {
-        const f = repulsionForce(pt);
-        pt.x = p.constrain(pt.x + f.fx, pt.r, p.width - pt.r);
-        pt.y = p.constrain(pt.y + f.fy, pt.r, p.height - pt.r);
+        // la posición "cruda" (dedo/mouse) y la posición visual ya no son lo mismo:
+        // la visual persigue a la cruda + el empuje de repulsión con un lerp,
+        // así el empuje se siente elástico en vez de un salto brusco.
+        const desiredX = p.constrain(pt.dragTargetX, pt.r, p.width - pt.r);
+        const desiredY = p.constrain(pt.dragTargetY, pt.r, p.height - pt.r);
+        const f = repulsionForce(pt, desiredX, desiredY);
+        const targetX = p.constrain(desiredX + f.fx, pt.r, p.width - pt.r);
+        const targetY = p.constrain(desiredY + f.fy, pt.r, p.height - pt.r);
+        pt.x = p.lerp(pt.x, targetX, DRAG_EASE);
+        pt.y = p.lerp(pt.y, targetY, DRAG_EASE);
       } else {
         const f = repulsionForce(pt);
         const wanderAngle = p.noise(pt.id * 17.3, p.frameCount * 0.004) * p.TWO_PI * 3;
@@ -171,14 +180,24 @@ const sketchEmpatia = (p) => {
     updateConnections();
   }
 
-  function repulsionForce(pt) {
+  // atX/atY opcionales: evalúa la repulsión en una posición distinta a pt.x/pt.y
+  // (se usa mientras se arrastra, para calcular la fuerza en base a la posición
+  // objetivo cruda y no a la posición visual, que va un paso atrás).
+  function repulsionForce(pt, atX, atY) {
+    const x = atX !== undefined ? atX : pt.x;
+    const y = atY !== undefined ? atY : pt.y;
     let fx = 0, fy = 0;
     for (const src of particles) {
       if (!src.active || !src.isRed || src.id === pt.id) continue;
-      const d = p.dist(pt.x, pt.y, src.x, src.y);
+      const d = p.dist(x, y, src.x, src.y);
       if (d < REPEL_RADIUS && d > 0.01) {
-        const factor = src.repulsionStrength * (1 - d / REPEL_RADIUS);
-        const ux = (pt.x - src.x) / d, uy = (pt.y - src.y) / d;
+        // antes era lineal (1 - d/REPEL_RADIUS): arrancaba de golpe apenas
+        // entraba al radio. Con la curva al cuadrado el empuje aparece
+        // gradualmente y se intensifica recién cerca del centro.
+        const t = 1 - d / REPEL_RADIUS;
+        const eased = t * t;
+        const factor = src.repulsionStrength * eased;
+        const ux = (x - src.x) / d, uy = (y - src.y) / d;
         fx += ux * factor * REPEL_MAX_PUSH;
         fy += uy * factor * REPEL_MAX_PUSH;
       }
@@ -339,6 +358,8 @@ const sketchEmpatia = (p) => {
       const pt = findParticleAt(t.x, t.y);
       if (pt) {
         pt.dragging = true;
+        pt.dragTargetX = t.x;
+        pt.dragTargetY = t.y;
         activeTouches[t.id] = pt.id;
       }
     }
@@ -350,8 +371,8 @@ const sketchEmpatia = (p) => {
       const pid = activeTouches[t.id];
       if (pid !== undefined) {
         const pt = particles[pid];
-        pt.x = p.constrain(t.x, pt.r, p.width - pt.r);
-        pt.y = p.constrain(t.y, pt.r, p.height - pt.r);
+        pt.dragTargetX = t.x;
+        pt.dragTargetY = t.y;
       }
     }
     return false;
@@ -374,6 +395,8 @@ const sketchEmpatia = (p) => {
     const pt = findParticleAt(p.mouseX, p.mouseY);
     if (pt) {
       pt.dragging = true;
+      pt.dragTargetX = p.mouseX;
+      pt.dragTargetY = p.mouseY;
       activeTouches['mouse'] = pt.id;
     }
   };
@@ -381,8 +404,8 @@ const sketchEmpatia = (p) => {
     const pid = activeTouches['mouse'];
     if (pid !== undefined) {
       const pt = particles[pid];
-      pt.x = p.constrain(p.mouseX, pt.r, p.width - pt.r);
-      pt.y = p.constrain(p.mouseY, pt.r, p.height - pt.r);
+      pt.dragTargetX = p.mouseX;
+      pt.dragTargetY = p.mouseY;
     }
   };
   p.mouseReleased = () => {
