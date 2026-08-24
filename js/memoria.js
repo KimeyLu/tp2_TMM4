@@ -8,8 +8,8 @@ const Memoria = (p) => {
   let originalX = 0;
   let originalY = 500;
 
-  let wobbleAmplitude = 8;
-  let wobbleSpeed = 0.03;
+  let wobbleAmplitude = 3;
+  let wobbleSpeed = 0.01;
 
   let SNAP_DURATION = 500;
   let RETURN_DURATION = 400;
@@ -40,7 +40,7 @@ const Memoria = (p) => {
       this.y = y;
       this.size = size;
 
-      this.type = type !== undefined ? type : p.floor(p.random(3));
+      this.type = type !== undefined ? type : p.floor(p.random(3)); //la figura de base es 3
       this.color = col !== undefined ? col : p.random([p.color('#F0D583'), p.color('#121212')]);
 
       this.dragging = false;
@@ -81,7 +81,7 @@ const Memoria = (p) => {
       let b = this.getBounds();
       return mx >= b.left && mx <= b.right && my >= b.top && my <= b.bottom;
     }
-
+    
     getCenter() {
       let b = this.getBounds();
       return {
@@ -166,10 +166,12 @@ const Memoria = (p) => {
     }
 
     draw() {
-      p.push();
+      p.push();  
+      p.noStroke();
       p.fill(this.color);
       if (this.type == 0) {
-        p.rect(this.x, this.y, this.size, this.size);
+        
+        p.rect(this.x-10, this.y, this.size, this.size);
       } else if (this.type == 1) {
         p.ellipse(this.x, this.y, this.size);
       } else {
@@ -250,16 +252,16 @@ const Memoria = (p) => {
         p.pop();
       } else {
         p.rectMode(p.CENTER);
-        p.rect(0, 0, this.size, this.size);
+        p.rect(-10, 0, this.size, this.size);
         p.push();
           p.noStroke();
           p.fill('#970510');
-          p.rect(0, 0, this.size / 2, this.size / 2);
+          p.rect(-10, 0, this.size / 2, this.size / 2);
           p.push();
             p.fill('#970510');
             p.strokeWeight(3);
             p.stroke(this.lastColor);
-            p.rect(0, 0, this.size / 2.4, this.size / 2.4);
+            p.rect(-10, 0, this.size / 2.4, this.size / 2.4);
           p.pop();
         p.pop();
       }
@@ -282,17 +284,22 @@ const Memoria = (p) => {
   };
 
   p.draw = function () {
+
     p.background('#970510');
     p.translate(p.width / 2, 0);
     p.rotate(ROTATION_ANGLE);
     p.noStroke();
 
-    let snappedShape = shapes.find(s => s.snapped);
-    register.draw(snappedShape);
+    p.print(p.mouseX, p.mouseY);
 
     p.push();
     p.stroke(30, 30, 30);
     p.strokeWeight(1.5);
+    p.line( 0, 0, 0, p.height);
+    p.pop();
+
+    let snappedShape = shapes.find(s => s.snapped);
+    register.draw(snappedShape);
 
     let originPoint = { x: originalX, y: p.height };
     let nearestShape = null;
@@ -306,14 +313,6 @@ const Memoria = (p) => {
         nearestShape = s;
       }
     }
-    if (nearestShape) {
-      let c = nearestShape.getCenter();
-      p.push();
-      p.stroke(30, 30, 30);
-      p.strokeWeight(1.5);
-      p.line(originPoint.x, originPoint.y, c.x, c.y);
-      p.pop();
-    }
 
     let exitPoint = { x: originalX, y: -30 };
     let nearestExitShape = null;
@@ -326,14 +325,6 @@ const Memoria = (p) => {
         nearestExitDist = d;
         nearestExitShape = s;
       }
-    }
-    if (nearestExitShape) {
-      let c = nearestExitShape.getCenter();
-      p.push();
-      p.stroke(30, 30, 30);
-      p.strokeWeight(1.5);
-      p.line(exitPoint.x, exitPoint.y, c.x, c.y);
-      p.pop();
     }
 
     let freeShapes = shapes.filter(s => !s.dragging && !s.snapped && !s.returning);
