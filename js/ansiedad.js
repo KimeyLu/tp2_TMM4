@@ -79,6 +79,9 @@ const sketchAnsiedad = (p) => {
   }
 
   p.draw = () => {
+
+    //if (p.mouseX > -5 && p.mouseY > -5) 
+
     p.background(BG);
     drawLattice();
 
@@ -92,6 +95,7 @@ const sketchAnsiedad = (p) => {
 
     drawSatellites(totalJitter);
     drawMainCircle(totalJitter);
+    
   };
 
   function drawLattice() {
@@ -203,15 +207,18 @@ const sketchAnsiedad = (p) => {
   }
 
   function handleTouchDown(x, y) {
-    if (isInsideDiamond(x, y)) {
-      removeSatellite();
-    } else {
-      addSatellite();
+    if (p.mouseX > 0 && p.mouseX < p.width && p.mouseY > 0 && p.mouseY < p.height) {
+        if (isInsideDiamond(x, y)) {
+        removeSatellite();
+        } else {
+        addSatellite();
+        }
+        if (primaryId === null) {
+        target.x = x;
+        target.y = y;
+        }
     }
-    if (primaryId === null) {
-      target.x = x;
-      target.y = y;
-    }
+
   }
 
   p.touchStarted = () => {
