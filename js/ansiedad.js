@@ -9,11 +9,20 @@ const sketchAnsiedad = (p) => {
   const JITTER_PER_SAT = 0.35;
   const MAX_JITTER = 9;
 
+  // umbral de histéresis: cuánto más cerca tiene que estar OTRO lado
+  // para que el nodo se transfiera. Evita que salte solo por ruido/jitter.
+  const EDGE_SWITCH_MARGIN = 6;
+
   let container;
   let cx, cy, DIAMOND_R, MAIN_R, SAT_R_MIN, SAT_R_MAX;
   let mainCircle, target;
   let satellites = [];
   let primaryId = null;
+
+  // nodo conector: queda "anclado" a un solo lado del rombo hasta que
+  // otro lado esté claramente más cerca (igual que tryTransfer en el
+  // ejemplo de incertidumbre).
+  let anchorEdgeIndex = 0;
 
   p.setup = () => {
     container = document.getElementById('ansiedad');
@@ -136,24 +145,61 @@ const sketchAnsiedad = (p) => {
     p.circle(px, py, MAIN_R * 2);
   }
 
+  // ---------- lados del rombo como 4 segmentos fijos ----------
+  function getDiamondEdges() {
+    const top = { x: cx, y: cy - DIAMOND_R };
+    const right = { x: cx + DIAMOND_R, y: cy };
+    const bottom = { x: cx, y: cy + DIAMOND_R };
+    const left = { x: cx - DIAMOND_R, y: cy };
+    return [
+      { a: top, b: right },
+      { a: right, b: bottom },
+      { a: bottom, b: left },
+      { a: left, b: top }
+    ];
+  }
+
+  function closestPointOnSegment(px, py, a, b) {
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const apx = px - a.x, apy = py - a.y;
+    const lenSq = abx * abx + aby * aby;
+    let t = lenSq === 0 ? 0 : (apx * abx + apy * aby) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const qx = a.x + abx * t, qy = a.y + aby * t;
+    const dx = px - qx, dy = py - qy;
+    return { point: { x: qx, y: qy }, dist: Math.sqrt(dx * dx + dy * dy) };
+  }
+
   function drawConnector(px, py) {
-    // punto más cercano en el borde del rombo, proyectando desde el centro
-    let dx = px - cx, dy = py - cy;
-    const L = Math.abs(dx) + Math.abs(dy);
-    let ex = cx, ey = cy + DIAMOND_R;
-    if (L > 0) {
-      const s = DIAMOND_R / L;
-      ex = cx + dx * s;
-      ey = cy + dy * s;
+    const edges = getDiamondEdges();
+
+    // distancia al lado actualmente anclado
+    const current = closestPointOnSegment(px, py, edges[anchorEdgeIndex].a, edges[anchorEdgeIndex].b);
+    let bestIndex = anchorEdgeIndex;
+    let bestDist = current.dist;
+    let bestPoint = current.point;
+
+    // sólo transferimos si otro lado está claramente más cerca (histéresis),
+    // así el nodo no tiembla entre lados por el jitter o por pasar cerca del centro
+    for (let i = 0; i < edges.length; i++) {
+      if (i === anchorEdgeIndex) continue;
+      const res = closestPointOnSegment(px, py, edges[i].a, edges[i].b);
+      if (res.dist + EDGE_SWITCH_MARGIN < bestDist) {
+        bestDist = res.dist;
+        bestIndex = i;
+        bestPoint = res.point;
+      }
     }
+
+    anchorEdgeIndex = bestIndex;
 
     p.stroke(RED);
     p.strokeWeight(2);
-    p.line(px, py, ex, ey);
+    p.line(px, py, bestPoint.x, bestPoint.y);
 
     p.noStroke();
     p.fill(RED);
-    p.circle(ex, ey, MAIN_R * 0.5);
+    p.circle(bestPoint.x, bestPoint.y, MAIN_R * 0.5);
   }
 
   function handleTouchDown(x, y) {
