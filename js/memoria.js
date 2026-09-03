@@ -8,10 +8,10 @@ const Memoria = (p) => {
  
     const COLORS = ['#F0D583', '#121212'];
     const TYPES = ['triangle', 'rect', 'circle'];
-    const N_SHAPES = 9;
+    const N_SHAPES = 10;
     const SHAPE_SPEED = 1.5; // velocidad fija para todas las formas
     let WRAP_LEN; // distancia total del ciclo (igual para todas, evita desfasajes)
-    const ROTATION_ANGLE = p.radians(-20); // rotacion del canvas, ajustable
+    const ROTATION_ANGLE = p.radians(-43); // rotacion del canvas, ajustable
  
     // cursor
     let cursorSize = 30;
@@ -23,7 +23,7 @@ const Memoria = (p) => {
     p.setup = function() {
         p.createCanvas(400, 400);
         lineY = p.height / 2;
-        WRAP_LEN = p.width + 40; // buffer fijo, mayor al tamanio maximo de una forma
+        WRAP_LEN = p.width + 180; // buffer fijo, mayor al tamanio maximo de una forma
         MEMORY_START_Y = p.height / 4;
  
         for (let i = 0; i < N_SHAPES; i++) {
@@ -41,8 +41,8 @@ const Memoria = (p) => {
         p.translate(-p.width / 2, -p.height / 2);
  
         p.stroke('#F0D583');
-        p.strokeWeight(1);
-        p.line(-15, lineY, p.width+10, lineY);
+        p.strokeWeight(2);
+        p.line(-100, lineY, p.width+100, lineY);
  
         DrawShapes();
         ShapeMemory();
@@ -71,7 +71,7 @@ const Memoria = (p) => {
             offset: offset, // posicion de referencia dentro del ciclo, fija
             lastCycle: 0,
             clicked: false, // evita generar mas de un clon por ciclo
-            size: p.random(16, 26),
+            size: p.random(24, 24),
             type: p.random(TYPES),
             color: p.random(COLORS)
         };
@@ -102,7 +102,7 @@ const Memoria = (p) => {
         for (let s of shapes) {
             let cyclePos = (s.offset + travel) % WRAP_LEN;
             let cycleCount = Math.floor((s.offset + travel) / WRAP_LEN);
-            s.x = cyclePos - 20;
+            s.x = cyclePos - 100; //posicion en que inician las formas, aparecen, principio
  
             // al arrancar un nuevo ciclo, se reasignan tipo y color
             // y se habilita de nuevo la posibilidad de generar un clon
