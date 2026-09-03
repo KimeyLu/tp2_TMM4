@@ -10,37 +10,30 @@ const CONFIG = {
   canvasSize: 640,
 
   squareSize: 150,
+  outlineSpacing: 11,      // px between nested charge-outlines
   strokeWeightThin: 1.6,
 
   nodeRadius: 8,
-  nodeOffset: 62,          // distance the node floats outside the square edge (normal, unwarned)
-  minNodeOffset: 20,       // closest the node gets as the warning peaks — keeps a sliver of line visible
-  cornerBlendPx: 26,       // how close (in px along the perimeter) to a corner before the normal starts turning
-  easeAnchor: 0.30,        // how fast the edge-anchor slides (normal, unwarned)
-  easeNode: 0.34,          // how fast the visible node eases toward its target (normal, unwarned)
+  nodeOffset: 44,          // distance the node floats outside the square edge
+  easeAnchor: 0.16,        // how fast the edge-anchor slides
+  easeNode: 0.22,          // how fast the visible node eases toward its target
 
   chargeDuration: 3.0,     // seconds — phase 1
   pauseBetweenAttacks: 0.8,// seconds — rest between attacks
-
-  // movement-based warning: as the triangle nears launch, the player's own
-  // easing gets multiplied down toward minSpeedMultiplier instead of any
-  // visual cue on the square. Starts almost immediately and keeps easing
-  // down the whole charge, so it reads as gradual rather than a late snap.
-  warningStartFraction: 0.12, // fraction of chargeDuration where slowdown begins
-  minSpeedMultiplier: 0.07,   // speed multiplier reached right as the dash launches
+  fillFlashTime: 0.16,     // seconds — square fill fade-in speed
 
   triangleLength: 200,
   triangleHalfWidth: 80,
-  dashSpeed: 1250,         // px / sec top speed — unaffected by the wobble ramp
+  dashSpeed: 1250,         // px / sec top speed
   dashAccelTime: 0.22,     // seconds to reach top speed
   pullBackMax: 40,         // px the triangle winds up before launching
-  wobbleFreqStart: 4.5,    // rad/s — wind-up shake speed right when charging starts
-  wobbleFreqEnd: 26,       // rad/s — wind-up shake speed right before the dash launches
   spawnMargin: 3,         // px outside the canvas the enemy spawns at
 
   colors: {
     bg: '#111111',
     squareOutline: '#5c1414',
+    squareOutlineBright: '#8f2323',
+    squareFill: '#c81e1e',
     node: '#ff2f2f',
     nodeGlow: 'rgba(255,47,47,0.28)',
     triangle: '#f2dca0',
@@ -56,7 +49,6 @@ const CONFIG = {
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 function easeInQuad(t) { return t * t; }
 function easeOutQuad(t) { return t * (2 - t); }
-function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 
 // ---------------------------------------------------------
 // PERIMETER MATH HELPERS (square edge parametrization)
@@ -106,39 +98,6 @@ function normalForSide(side) {
   }
 }
 
-// Perpendicular-to-the-edge everywhere, EXCEPT within `blend` px of a
-// corner, where it smoothly turns from the outgoing side's normal to the
-// incoming side's normal instead of jumping. That keeps the offset line
-// straight/perpendicular along the walls (matching how it looked before)
-// while still closing the corner gap that let the node cut inside the
-// square when the offset got small.
-const SIDE_ORDER = ['top', 'right', 'bottom', 'left'];
-function cornerBlendedNormal(u, size, blend) {
-  const total = size * 4;
-  u = ((u % total) + total) % total;
-  const idx = Math.floor(u / size);
-  const local = u - idx * size;
-  const currNormal = normalForSide(SIDE_ORDER[idx]);
-
-  let fromNormal = currNormal, toNormal = currNormal, t = 0;
-  if (local < blend) {
-    fromNormal = normalForSide(SIDE_ORDER[(idx + 3) % 4]);
-    toNormal = currNormal;
-    t = local / blend;
-  } else if (local > size - blend) {
-    fromNormal = currNormal;
-    toNormal = normalForSide(SIDE_ORDER[(idx + 1) % 4]);
-    t = (local - (size - blend)) / blend;
-  } else {
-    return currNormal;
-  }
-
-  const x = lerp(fromNormal.x, toNormal.x, t);
-  const y = lerp(fromNormal.y, toNormal.y, t);
-  const len = Math.hypot(x, y) || 1;
-  return { x: x / len, y: y / len };
-}
-
 // ---------------------------------------------------------
 // GEOMETRY HELPERS (collision)
 // ---------------------------------------------------------
@@ -177,18 +136,59 @@ class Square {
     this.cx = cx;
     this.cy = cy;
     this.size = size;
+    this.fillAlpha = 0;
   }
 
-  draw() {
+  // chargeStage: 0..CONFIG.chargeDuration seconds. filling: bool, fillT: 0..1
+  draw(chargeStage, filling, fillT) {
     push();
     translate(this.cx, this.cy);
     rectMode(CENTER);
+
+    // base outline
     noFill();
     stroke(CONFIG.colors.squareOutline);
     strokeWeight(CONFIG.strokeWeightThin);
     rect(0, 0, this.size, this.size);
+
+    // nested charge outlines (appear at stage thresholds 1 and 2)
+    const thresholds = [1, 2];
+    let innerMostSize = this.size;
+    for (let i = 0; i < thresholds.length; i++) {
+      const t = constrain(chargeStage - thresholds[i], 0, 1);
+      if (t <= 0) continue;
+      const eased = easeOutCubic(t);
+      const inset = eased * CONFIG.outlineSpacing * (i + 1) * 2;
+      const s = this.size - inset;
+      innerMostSize = s;
+      stroke(CONFIG.colors.squareOutlineBright);
+      strokeWeight(CONFIG.strokeWeightThin);
+      let a = eased * 255;
+      strokeAlpha(CONFIG.colors.squareOutlineBright, a);
+      rect(0, 0, s, s);
+    }
+
+    // fill flash once charge completes
+    if (filling) {
+      const a = easeOutCubic(constrain(fillT, 0, 1)) * 255;
+      noStroke();
+      const c = color(CONFIG.colors.squareFill);
+      c.setAlpha(a);
+      fill(c);
+      const fillSize = innerMostSize - CONFIG.outlineSpacing * 2;
+      const s = Math.max(fillSize, this.size * 0.35);
+      rect(0, 0, s, s);
+    }
+
     pop();
   }
+}
+
+// small helper to draw a stroke with custom alpha without mutating CONFIG
+function strokeAlpha(hexColor, alpha) {
+  const c = color(hexColor);
+  c.setAlpha(alpha);
+  stroke(c);
 }
 
 // ---------------------------------------------------------
@@ -202,7 +202,6 @@ class Player {
     this.u = 0;
     this.anchor = { x: 0, y: 0 };
     this.pos = { x: 0, y: 0 };
-    this.offsetDist = CONFIG.nodeOffset;
     this.currentSide = 'top';
     this._syncInstant();
   }
@@ -228,45 +227,30 @@ class Player {
     const p = this._targetPointFor(this.u);
     this.anchor.x = p.x;
     this.anchor.y = p.y;
-    this.offsetDist = CONFIG.nodeOffset;
-    const n = cornerBlendedNormal(this.u, this.size, CONFIG.cornerBlendPx);
-    this.pos.x = p.x + n.x * this.offsetDist;
-    this.pos.y = p.y + n.y * this.offsetDist;
+    const n = normalForSide(p.side);
+    this.pos.x = p.x + n.x * CONFIG.nodeOffset;
+    this.pos.y = p.y + n.y * CONFIG.nodeOffset;
     this.currentSide = p.side;
   }
 
-  // speedMult (0..1) is the movement-warning throttle: 1 = full mobility,
-  // lower values = the "the dash is about to launch" cue, replacing the
-  // old visual warning on the square. nodeOffset lets that same warning
-  // pull the node in closer to the square (down to CONFIG.minNodeOffset).
-  update(mx, my, canMove, speedMult = 1, nodeOffset = CONFIG.nodeOffset) {
+  update(mx, my, canMove) {
     if (canMove) {
       const targetU = this.computeTargetU(mx, my);
       const total = this.size * 4;
       let diff = ((targetU - this.u + total * 1.5) % total) - total * 0.5;
-      this.u += diff * CONFIG.easeAnchor * speedMult;
+      this.u += diff * CONFIG.easeAnchor;
     }
 
     const p = this._targetPointFor(this.u);
-    // the anchor sits exactly on the perimeter — this.u above is already
-    // what provides the smooth sliding, so the anchor doesn't need (and
-    // shouldn't get) a second, separate 2D lerp toward it.
-    this.anchor.x = p.x;
-    this.anchor.y = p.y;
+    const n = normalForSide(p.side);
+    const targetAnchorX = p.x, targetAnchorY = p.y;
+    const targetNodeX = p.x + n.x * CONFIG.nodeOffset;
+    const targetNodeY = p.y + n.y * CONFIG.nodeOffset;
 
-    // perpendicular-to-the-wall almost everywhere; only turns smoothly
-    // within CONFIG.cornerBlendPx of a corner.
-    const n = cornerBlendedNormal(this.u, this.size, CONFIG.cornerBlendPx);
-
-    // only the DISTANCE from the anchor is eased (a single number), never
-    // pos.x/pos.y independently — that's what keeps the connector line
-    // exactly along the normal at all times, instead of drifting sideways
-    // (looking diagonal) while the offset shrinks or the anchor slides.
-    const nodeEase = CONFIG.easeNode * speedMult;
-    this.offsetDist = lerp(this.offsetDist, nodeOffset, nodeEase);
-
-    this.pos.x = this.anchor.x + n.x * this.offsetDist;
-    this.pos.y = this.anchor.y + n.y * this.offsetDist;
+    this.anchor.x = lerp(this.anchor.x, targetAnchorX, CONFIG.easeAnchor);
+    this.anchor.y = lerp(this.anchor.y, targetAnchorY, CONFIG.easeAnchor);
+    this.pos.x = lerp(this.pos.x, targetNodeX, CONFIG.easeNode);
+    this.pos.y = lerp(this.pos.y, targetNodeY, CONFIG.easeNode);
     this.currentSide = p.side;
   }
 
@@ -320,17 +304,13 @@ class Enemy {
     this.chargeTimer = 0;
     this.dashTimer = 0;
     this.speed = 0;
-    this.wobblePhase = 0;
   }
 
   update(dt) {
     if (this.state === 'charging') {
       this.chargeTimer += dt;
-      const progress = constrain(this.chargeTimer / CONFIG.chargeDuration, 0, 1);
-      const envelope = easeOutCubic(progress);
-      const freq = lerp(CONFIG.wobbleFreqStart, CONFIG.wobbleFreqEnd, progress);
-      this.wobblePhase += freq * dt;
-      const wobble = Math.sin(this.wobblePhase) * CONFIG.pullBackMax * 0.5;
+      const envelope = easeOutCubic(constrain(this.chargeTimer / CONFIG.chargeDuration, 0, 1));
+      const wobble = Math.sin(this.chargeTimer * 9.0) * CONFIG.pullBackMax * 0.5;
       const pull = (CONFIG.pullBackMax * 0.5 + wobble * 0.5) * envelope;
       this.pos.x = this.spawn.x - this.dir.x * pull;
       this.pos.y = this.spawn.y - this.dir.y * pull;
@@ -340,8 +320,7 @@ class Enemy {
         this.dashTimer = 0;
         this.speed = 0;
         // dash always launches cleanly from the spawn point, not from
-        // wherever the wind-up wobble happened to leave it, and always at
-        // the same configured speed regardless of how fast it was shaking
+        // wherever the wind-up wobble happened to leave it
         this.pos.x = this.spawn.x;
         this.pos.y = this.spawn.y;
       }
@@ -432,26 +411,18 @@ class AttackController {
     return this.state === 'charging';
   }
 
-  // 0 = no warning yet, 1 = dash about to launch. Shared eased curve that
-  // drives both the player's slowdown and how close the node hugs the square.
-  get warningProgress() {
-    if (this.state !== 'charging' || !this.enemy) return 0;
-    const t = constrain(this.enemy.chargeTimer / CONFIG.chargeDuration, 0, 1);
-    if (t < CONFIG.warningStartFraction) return 0;
-    const localT = (t - CONFIG.warningStartFraction) / (1 - CONFIG.warningStartFraction);
-    return easeInOutCubic(constrain(localT, 0, 1));
+  get chargeStage() {
+    if (this.state === 'charging') return constrain(this.enemy.chargeTimer / CONFIG.chargeDuration, 0, 1) * 3;
+    return 3;
   }
 
-  // 1 = full mobility. Ramps down toward CONFIG.minSpeedMultiplier as the
-  // charge approaches completion — this IS the "it's about to move" warning.
-  get playerSpeedMultiplier() {
-    return lerp(1, CONFIG.minSpeedMultiplier, this.warningProgress);
+  get filling() {
+    return this.state === 'dashing' || (this.state === 'charging' && this.enemy.chargeTimer >= CONFIG.chargeDuration);
   }
 
-  // full nodeOffset normally, tightening toward minNodeOffset as the warning
-  // peaks, so the node visibly hugs the square right before the dash.
-  get playerNodeOffset() {
-    return lerp(CONFIG.nodeOffset, CONFIG.minNodeOffset, this.warningProgress);
+  get fillT() {
+    if (this.state === 'dashing') return constrain(this.enemy.dashTimer / CONFIG.fillFlashTime, 0, 1);
+    return 0;
   }
 
   update(dt) {
@@ -498,7 +469,7 @@ class Game {
 
   update(dt, mx, my) {
     this.controller.update(dt);
-    this.player.update(mx, my, this.controller.canPlayerMove, this.controller.playerSpeedMultiplier, this.controller.playerNodeOffset);
+    this.player.update(mx, my, this.controller.canPlayerMove);
 
     if (this.controller.state === 'dashing') {
       const pts = this.controller.enemy.getPoints();
@@ -511,7 +482,7 @@ class Game {
   draw() {
     background(CONFIG.colors.bg);
 
-    this.square.draw();
+    this.square.draw(this.controller.chargeStage, this.controller.filling, this.controller.fillT);
     this.controller.draw();
     this.player.draw();
   }
