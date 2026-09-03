@@ -1,387 +1,224 @@
 const Memoria = (p) => {
-
-  // ===================== CONFIG GENERAL =====================
-  let registerX = 150;
-  let registerY = 200;
-  let registerSize = 150;
-
-  let originalX = 0;
-  let originalY = 500;
-
-  let wobbleAmplitude = 3;
-  let wobbleSpeed = 0.01;
-
-  let SNAP_DURATION = 500;
-  let RETURN_DURATION = 400;
-
-  let ROTATION_ANGLE = Math.PI / 4; // Math.PI es JS nativo, no necesita "p."
-
-  // Convierte mouseX/mouseY (coordenadas de pantalla) al sistema local
-  // ya trasladado y rotado, para que la lógica (clicks, drag) coincida
-  // con lo que se ve dibujado en pantalla.
-  // OJO: cos()/sin() SÍ son de p5 (dependen de angleMode), por eso llevan "p."
-  function getLocalMouse() {
-    let sx = p.mouseX - p.width / 2;
-    let sy = p.mouseY;
-    let cosA = p.cos(-ROTATION_ANGLE);
-    let sinA = p.sin(-ROTATION_ANGLE);
-    return {
-      x: sx * cosA - sy * sinA,
-      y: sx * sinA + sy * cosA
-    };
-  }
-
-  let shapes = [];
-
-  // ===================== CLASE SHAPE =====================
-  class Shape {
-    constructor(x, y, size, type, col) {
-      this.x = x;
-      this.y = y;
-      this.size = size;
-
-      this.type = type !== undefined ? type : p.floor(p.random(3)); //la figura de base es 3
-      this.color = col !== undefined ? col : p.random([p.color('#F0D583'), p.color('#121212')]);
-
-      this.dragging = false;
-      this.snapped = false;
-      this.snapTime = 0;
-      this.lastY = y;
-
-      this.returning = false;
-      this.returnStartTime = 0;
-      this.returnFrom = { x, y };
-      this.returnTo = { x, y };
+ 
+    // ---------- variables necesarias ----------
+    let lineY;
+    let shapes = [];       // formas que recorren la linea
+    let memories = [];     // clones guardados al costado de la linea
+    let leavingItems = [];  // clones en proceso de desaparecer (animacion FIFO)
+ 
+    const COLORS = ['#F0D583', '#121212'];
+    const TYPES = ['triangle', 'rect', 'circle'];
+    const N_SHAPES = 9;
+    const SHAPE_SPEED = 1.5; // velocidad fija para todas las formas
+    let WRAP_LEN; // distancia total del ciclo (igual para todas, evita desfasajes)
+    const ROTATION_ANGLE = p.radians(-20); // rotacion del canvas, ajustable
+ 
+    // cursor
+    let cursorSize = 30;
+    const CURSOR_BASE_SIZE = 30;
+    let cursorColor = '#F0D583';
+    let hitTimer = 0;
+    const HIT_DURATION = 18; // frames que dura la animacion de "achique"
+ 
+    p.setup = function() {
+        p.createCanvas(400, 400);
+        lineY = p.height / 2;
+        WRAP_LEN = p.width + 40; // buffer fijo, mayor al tamanio maximo de una forma
+        MEMORY_START_Y = p.height / 4;
+ 
+        for (let i = 0; i < N_SHAPES; i++) {
+            shapes.push(makeShape(i * (WRAP_LEN / N_SHAPES)));
+        }
     }
-
-    getBounds() {
-      let left, top, right, bottom;
-
-      if (this.type == 0) {
-        left = this.x;
-        top = this.y;
-        right = this.x + this.size;
-        bottom = this.y + this.size;
-      } else if (this.type == 1) {
-        left = this.x - this.size / 2;
-        top = this.y - this.size / 2;
-        right = this.x + this.size / 2;
-        bottom = this.y + this.size / 2;
-      } else {
-        left = this.x - this.size / 2;
-        top = this.y;
-        right = this.x + this.size / 2;
-        bottom = this.y + this.size;
-      }
-
-      return { left, top, right, bottom };
+ 
+    p.draw = function() {
+        p.background('#970510');
+ 
+        // todo lo que se dibuja aca adentro queda afectado por la rotacion
+        p.push();
+        p.translate(p.width / 2, p.height / 2);
+        p.rotate(ROTATION_ANGLE);
+        p.translate(-p.width / 2, -p.height / 2);
+ 
+        p.stroke('#F0D583');
+        p.strokeWeight(1);
+        p.line(-15, lineY, p.width+10, lineY);
+ 
+        DrawShapes();
+        ShapeMemory();
+ 
+        p.pop();
+ 
+        // el cursor queda fuera de la rotacion para seguir al puntero real
+        CursorInteraction();
     }
-
-    contains(mx, my) {
-      let b = this.getBounds();
-      return mx >= b.left && mx <= b.right && my >= b.top && my <= b.bottom;
+ 
+    function toLocalCoords(x, y) {
+        // convierte una coordenada de pantalla (ej: el mouse) al sistema
+        // "sin rotar" en el que estan definidas las formas, invirtiendo
+        // la misma rotacion que se aplica en p.draw
+        let cx = p.width / 2, cy = p.height / 2;
+        let dx = x - cx, dy = y - cy;
+        let cosA = Math.cos(-ROTATION_ANGLE), sinA = Math.sin(-ROTATION_ANGLE);
+        return {
+            x: dx * cosA - dy * sinA + cx,
+            y: dx * sinA + dy * cosA + cy
+        };
     }
-    
-    getCenter() {
-      let b = this.getBounds();
-      return {
-        x: (b.left + b.right) / 2,
-        y: (b.top + b.bottom) / 2
-      };
+ 
+    function makeShape(offset) {
+        return {
+            offset: offset, // posicion de referencia dentro del ciclo, fija
+            lastCycle: 0,
+            clicked: false, // evita generar mas de un clon por ciclo
+            size: p.random(16, 26),
+            type: p.random(TYPES),
+            color: p.random(COLORS)
+        };
     }
-
-    startDrag() {
-      this.dragging = true;
-      this.lastY = this.y;
+ 
+    function drawShapeAt(x, y, size, type, color, alpha = 255) {
+        p.push();
+        p.noStroke();
+        let c = p.color(color);
+        p.fill(p.red(c), p.green(c), p.blue(c), alpha);
+        p.translate(x, y);
+        if (type === 'circle') {
+            p.circle(0, 0, size);
+        } else if (type === 'rect') {
+            p.rectMode(p.CENTER);
+            p.rect(0, 0, size, size);
+        } else if (type === 'triangle') {
+            p.triangle(-size / 2, size / 2, size / 2, size / 2, 0, -size / 2);
+        }
+        p.pop();
     }
-
-    trySnap(reg) {
-      let b = this.getBounds();
-      let fits =
-        b.left >= reg.x &&
-        b.top >= reg.y &&
-        b.right <= reg.x + reg.size &&
-        b.bottom <= reg.y + reg.size;
-
-      if (fits) {
-        let centerX = reg.x + reg.size / 2;
-        let centerY = reg.y + reg.size / 2;
-
-        if (this.type == 0) {
-          this.x = centerX - this.size / 2;
-          this.y = centerY - this.size / 2;
-        } else if (this.type == 1) {
-          this.x = centerX;
-          this.y = centerY;
+ 
+    function DrawShapes() {
+        // se crean formas de tipos y colores aleatorios, avanzan por la linea
+        // y al salir del canvas reaparecen al inicio, siempre a la misma distancia
+        // entre si (posicion calculada por modulo, no acumulada frame a frame)
+        let travel = SHAPE_SPEED * p.frameCount;
+        for (let s of shapes) {
+            let cyclePos = (s.offset + travel) % WRAP_LEN;
+            let cycleCount = Math.floor((s.offset + travel) / WRAP_LEN);
+            s.x = cyclePos - 20;
+ 
+            // al arrancar un nuevo ciclo, se reasignan tipo y color
+            // y se habilita de nuevo la posibilidad de generar un clon
+            if (cycleCount !== s.lastCycle) {
+                s.lastCycle = cycleCount;
+                s.type = p.random(TYPES);
+                s.color = p.random(COLORS);
+                s.clicked = false;
+            }
+ 
+            drawShapeAt(s.x, lineY, s.size, s.type, s.color);
+        }
+    }
+ 
+    function CursorInteraction() {
+        // el cursor solo aparece mientras se presiona el mouse
+        if (!p.mouseIsPressed) return;
+ 
+        if (hitTimer > 0) {
+            // animacion de achique + cambio de color al tocar una forma
+            let t = hitTimer / HIT_DURATION; // 1 -> 0
+            let shrink = p.sin((1 - t) * p.PI) * (CURSOR_BASE_SIZE * 0.5);
+            cursorSize = CURSOR_BASE_SIZE - shrink;
+            cursorColor = '#121212';
+            hitTimer--;
         } else {
-          this.x = centerX;
-          this.y = centerY - (this.size * 2) / 3;
+            cursorSize = CURSOR_BASE_SIZE;
+            cursorColor = '#F0D583';
         }
-
-        this.snapped = true;
-        this.snapTime = p.millis();
-        reg.lastColor = this.color;
-        reg.lastType = this.type;
-      } else {
-        this.snapped = false;
-        this.x = originalX;
-        this.y = this.lastY;
-      }
-
-      return fits;
-    }
-
-    update() {
-      if (this.dragging) {
-        let m = getLocalMouse();
-        this.x = m.x;
-        this.y = m.y;
-      } else if (this.returning) {
-        let elapsed = p.millis() - this.returnStartTime;
-        let t = p.constrain(elapsed / RETURN_DURATION, 0, 1);
-        let eased = 1 - p.pow(1 - t, 3);
-        this.x = p.lerp(this.returnFrom.x, this.returnTo.x, eased);
-        this.y = p.lerp(this.returnFrom.y, this.returnTo.y, eased);
-        if (t >= 1) {
-          this.returning = false;
-        }
-      } else if (!this.snapped) {
-        this.y--;
-        this.x = originalX + p.sin(p.frameCount * wobbleSpeed) * wobbleAmplitude;
-      }
-
-      if (this.snapped && p.millis() - this.snapTime > SNAP_DURATION) {
-        this.snapped = false;
-        this.returning = true;
-        this.returnStartTime = p.millis();
-        this.returnFrom = { x: this.x, y: this.y };
-        this.returnTo = { x: originalX, y: this.lastY };
-      }
-
-      if (this.y < -30) {
-        this.y = p.height;
-        this.type = p.floor(p.random(3));
-        this.color = p.random([p.color('#F0D583'), p.color('#121212')]);
-      }
-    }
-
-    draw() {
-      p.push();  
-      p.noStroke();
-      p.fill(this.color);
-      if (this.type == 0) {
-        
-        p.rect(this.x-10, this.y, this.size, this.size);
-      } else if (this.type == 1) {
-        p.ellipse(this.x, this.y, this.size);
-      } else {
-        p.triangle(
-          this.x, this.y,
-          this.x - this.size / 2, this.y + this.size,
-          this.x + this.size / 2, this.y + this.size
-        );
-      }
-      p.pop();
-    }
-  }
-
-  // ===================== CLASE REGISTER =====================
-  class Register {
-    constructor(x, y, size) {
-      this.x = x;
-      this.y = y;
-      this.size = size;
-      this.lastColor = p.color('#F0D583');
-      this.lastType = null;
-    }
-
-    getScale(snappedShape, animDuration = SNAP_DURATION) {
-      if (snappedShape) {
-        let elapsed = p.millis() - snappedShape.snapTime;
-        let t = p.constrain(elapsed / animDuration, 0, 1);
-        return 1 - 0.3 * p.sin(p.PI * t);
-      }
-      return 1;
-    }
-
-    draw(snappedShape) {
-      let s = this.getScale(snappedShape);
-      p.push();
-      p.fill(this.lastColor);
-      let cx = this.x + this.size / 2;
-      let cy = this.y + this.size / 2;
-      p.translate(cx, cy);
-      p.scale(s);
-
-      if (this.lastType === 1) {
-        p.ellipse(0, 0, this.size);
+ 
         p.push();
-          p.noStroke();
-          p.fill('#970510');
-          p.ellipse(0, 0, this.size / 2);
-          p.push();
-            p.fill('#970510');
-            p.strokeWeight(3);
-            p.stroke(this.lastColor);
-            p.ellipse(0, 0, this.size / 2.4);
-          p.pop();
+        p.noFill();
+        p.stroke(cursorColor);
+        p.strokeWeight(2);
+        p.circle(p.mouseX, p.mouseY, cursorSize);
         p.pop();
-      } else if (this.lastType === 2) {
-        p.triangle(
-          0, -this.size / 1.5,
-          -this.size / 2, this.size / 3,
-          this.size / 2, this.size / 3
-        );
-        p.push();
-          p.noStroke();
-          p.fill('#970510');
-          p.triangle(
-            0, -this.size / 2.9,
-            -this.size / 4.2, this.size / 5.4,
-            this.size / 4.2, this.size / 5.4
-          );
-          p.push();
-            p.strokeWeight(3);
-            p.stroke(this.lastColor);
-            p.triangle(
-              0, -this.size / 4,
-              -this.size / 5.2, this.size / 6.5,
-              this.size / 5.2, this.size / 6.5
-            );
-          p.pop();
-        p.pop();
-      } else {
-        p.rectMode(p.CENTER);
-        p.rect(-10, 0, this.size, this.size);
-        p.push();
-          p.noStroke();
-          p.fill('#970510');
-          p.rect(-10, 0, this.size / 2, this.size / 2);
-          p.push();
-            p.fill('#970510');
-            p.strokeWeight(3);
-            p.stroke(this.lastColor);
-            p.rect(-10, 0, this.size / 2.4, this.size / 2.4);
-          p.pop();
-        p.pop();
-      }
-
-      p.pop();
     }
-  }
-
-  // ===================== SETUP / DRAW =====================
-  let register;
-  let shapeGapY = 150;
-
-  p.setup = function () {
-    p.createCanvas(510, 505);
-    register = new Register(registerX, registerY, registerSize);
-
-    for (let i = 0; i < 4; i++) {
-      shapes.push(new Shape(originalX, p.height + i * shapeGapY, 30));
+ 
+    const MEMORY_COLS = 3;
+    const MEMORY_ROWS = 4;
+    const MEMORY_CAPACITY = MEMORY_COLS * MEMORY_ROWS;
+    const MEMORY_START_X = 120;
+    let MEMORY_START_Y; // depende de p.height, se asigna en setup, *porque esto esta asi??
+    const MEMORY_COL_SPACING = 80; // distancia horizontal entre columnas
+    const MEMORY_ROW_SPACING = 22; // distancia vertical entre formas de una misma columna
+    const SLIDE_EASE = 0.2;      // velocidad del reacomodo de los que se quedan
+    const LEAVE_DURATION = 30;   // frames que dura la animacion de salida
+    const LEAVE_RISE = 30;       // cuanto sube (px) el que se va
+ 
+    function slotPos(i) {
+        let col = Math.floor(i / MEMORY_ROWS);
+        let row = i % MEMORY_ROWS;
+        return { x: MEMORY_START_X + col * MEMORY_COL_SPACING, y: MEMORY_START_Y + row * MEMORY_ROW_SPACING };
     }
-  };
-
-  p.draw = function () {
-
-    p.background('#970510');
-    p.translate(p.width / 2, 0);
-    p.rotate(ROTATION_ANGLE);
-    p.noStroke();
-
-    p.print(p.mouseX, p.mouseY);
-
-    p.push();
-    p.stroke(30, 30, 30);
-    p.strokeWeight(1.5);
-    p.line( 0, 0, 0, p.height);
-    p.pop();
-
-    let snappedShape = shapes.find(s => s.snapped);
-    register.draw(snappedShape);
-
-    let originPoint = { x: originalX, y: p.height };
-    let nearestShape = null;
-    let nearestOriginDist = Infinity;
-    for (let s of shapes) {
-      if (s.dragging || s.snapped) continue;
-      let c = s.getCenter();
-      let d = p.dist(originPoint.x, originPoint.y, c.x, c.y);
-      if (d < nearestOriginDist) {
-        nearestOriginDist = d;
-        nearestShape = s;
-      }
-    }
-
-    let exitPoint = { x: originalX, y: -30 };
-    let nearestExitShape = null;
-    let nearestExitDist = Infinity;
-    for (let s of shapes) {
-      if (s.dragging || s.snapped) continue;
-      let c = s.getCenter();
-      let d = p.dist(exitPoint.x, exitPoint.y, c.x, c.y);
-      if (d < nearestExitDist) {
-        nearestExitDist = d;
-        nearestExitShape = s;
-      }
-    }
-
-    let freeShapes = shapes.filter(s => !s.dragging && !s.snapped && !s.returning);
-    let drawnPairs = new Set();
-
-    for (let i = 0; i < freeShapes.length; i++) {
-      let a = freeShapes[i];
-      let ac = a.getCenter();
-
-      let nearestIdx = -1;
-      let nearestDist = Infinity;
-      for (let j = 0; j < freeShapes.length; j++) {
-        if (i === j) continue;
-        let bc = freeShapes[j].getCenter();
-        let d = p.dist(ac.x, ac.y, bc.x, bc.y);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearestIdx = j;
+ 
+    function ShapeMemory() {
+        // clones activos: 3 columnas, 4 formas por columna, con reacomodo suave
+        for (let i = 0; i < memories.length; i++) {
+            let m = memories[i];
+            let target = slotPos(i);
+            m.dispX = p.lerp(m.dispX, target.x, SLIDE_EASE);
+            m.dispY = p.lerp(m.dispY, target.y, SLIDE_EASE);
+            drawShapeAt(m.dispX, m.dispY, m.size, m.type, m.color);
         }
-      }
-
-      if (nearestIdx !== -1) {
-        let key = [i, nearestIdx].sort().join('-');
-        if (!drawnPairs.has(key)) {
-          drawnPairs.add(key);
-          let bc = freeShapes[nearestIdx].getCenter();
-          p.line(ac.x, ac.y, bc.x, bc.y);
+ 
+        // clones saliendo (First In): suben y se desvanecen antes de desaparecer
+        for (let i = leavingItems.length - 1; i >= 0; i--) {
+            let m = leavingItems[i];
+            m.leaveTimer--;
+            let progress = 1 - (m.leaveTimer / LEAVE_DURATION); // 0 -> 1
+            let y = m.startY - progress * LEAVE_RISE;
+            let alpha = 255 * (1 - progress);
+            drawShapeAt(m.startX, y, m.size, m.type, m.color, alpha);
+            if (m.leaveTimer <= 0) {
+                leavingItems.splice(i, 1);
+            }
         }
-      }
     }
-    p.pop();
-
-    for (let s of shapes) {
-      s.update();
-      s.draw();
+ 
+    function hitTest(shape, mx, my) {
+        let d = p.dist(mx, my, shape.x, lineY);
+        return d < shape.size / 2 + 4; // un poco de margen para que sea facil clickear
     }
-  };
-
-  p.mousePressed = function () {
-    let m = getLocalMouse();
-    for (let s of shapes) {
-      if (s.contains(m.x, m.y)) {
-        s.startDrag();
-        break;
-      }
+ 
+    p.mousePressed = function() {
+        let local = toLocalCoords(p.mouseX, p.mouseY);
+        for (let i = shapes.length - 1; i >= 0; i--) {
+            let s = shapes[i];
+            if (!s.clicked && hitTest(s, local.x, local.y)) {
+                hitTimer = HIT_DURATION;
+                s.clicked = true; // ya generó su clon, no puede generar otro hasta el proximo ciclo
+ 
+                // FIFO: si ya esta llena la memoria, el mas viejo (First In)
+                // pasa a animarse hacia arriba y desvanecerse en vez de borrarse de golpe
+                if (memories.length >= MEMORY_CAPACITY) {
+                    let removed = memories.shift();
+                    removed.leaveTimer = LEAVE_DURATION;
+                    removed.startX = removed.dispX; // se congela donde estaba, sin saltos
+                    removed.startY = removed.dispY;
+                    leavingItems.push(removed);
+                }
+ 
+                let idx = memories.length;
+                let pos = slotPos(idx);
+                memories.push({
+                    size: s.size * 0.5,
+                    type: s.type,
+                    color: s.color,
+                    dispX: pos.x, // nace ya en su posicion final
+                    dispY: pos.y
+                });
+                break; // solo la primera forma tocada
+            }
+        }
     }
-  };
-
-  p.mouseReleased = function () {
-    for (let s of shapes) {
-      if (s.dragging) {
-        s.dragging = false;
-        s.trySnap(register);
-      }
-    }
-  };
+ 
 };
-
-// Instanciación: 'contenedor-shapes-2' es el id del div donde va este canvas
+ 
 new p5(Memoria, 'memoria');
