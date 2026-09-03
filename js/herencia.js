@@ -14,6 +14,8 @@ const Herencia = (p) => {
   const SNAP_A = { x: 150, y: 128 };
   const SNAP_B = { x: 240, y: 128 };
  
+  const ROTATION_DEG = -40; // angulo de rotacion de todo el sketch
+ 
   p.setup = function() {
     p.createCanvas(400, 400);
     p.rectMode(p.CORNER);
@@ -28,17 +30,21 @@ const Herencia = (p) => {
  
   p.draw = function() {
     p.background('#970510');
-    
+ 
     p.push();
-    p.stroke('#F0D583');
-    p.strokeWeight(2);
-    p.line(0, p.height / 2, p.width, p.height / 2);
-    p.pop();
+    p.translate(p.width / 2, p.height / 2);
+    p.rotate(p.radians(ROTATION_DEG));
+    p.translate(-p.width / 2, -p.height / 2);
+ 
+    p.line(-100, p.height / 2, p.width + 100, p.height / 2);
  
     DrawRectZones();
     ParentShapesActions();
+    TryStartMerge();
     AnimateMerging();
     BornChildShape();
+ 
+    p.pop();
   }
  
   // ---------- zonas ----------
@@ -63,13 +69,23 @@ const Herencia = (p) => {
       x: rect.x + rect.w / 2,
       y: rect.y + rect.h / 2,
       size: SHAPE_SIZE,
-      placed: false
+      placed: false,
+      shrinkT: 0 // progreso de la animacion de achicado al soltarse en C
     };
   }
  
   function ParentShapesActions() {
-    if (parentA) drawShape(parentA);
-    if (parentB) drawShape(parentB);
+    if (parentA) { updatePlacedShrink(parentA); drawShape(parentA); }
+    if (parentB) { updatePlacedShrink(parentB); drawShape(parentB); }
+  }
+ 
+  // cuando una forma se suelta en C, va reduciendo su tamaño a la mitad
+  function updatePlacedShrink(s) {
+    if (s.placed && s.shrinkT < 1) {
+      s.shrinkT = Math.min(1, s.shrinkT + SHRINK_STEP);
+      const e = easeOutQuad(s.shrinkT);
+      s.size = p.lerp(SHAPE_SIZE, SHAPE_SIZE / 2, e);
+    }
   }
  
   function drawShape(s) {
@@ -109,6 +125,21 @@ const Herencia = (p) => {
            my > rectC.y - margin && my < rectC.y + rectC.h + margin;
   }
  
+  // como todo el sketch se dibuja rotado, esta funcion convierte la posicion
+  // del mouse (que p5 siempre da en coordenadas de pantalla) a las coordenadas
+  // "del mundo" que usan las formas, aplicando la rotacion inversa
+  function screenToWorld(mx, my) {
+    const cx = p.width / 2;
+    const cy = p.height / 2;
+    const ang = p.radians(-ROTATION_DEG);
+    const dx = mx - cx;
+    const dy = my - cy;
+    return {
+      x: cx + dx * Math.cos(ang) - dy * Math.sin(ang),
+      y: cy + dx * Math.sin(ang) + dy * Math.cos(ang)
+    };
+  }
+ 
   // ---------- forma hija ----------
   function inherit(a, b) {
     const type = (a.type === b.type) ? a.type : p.random([a.type, b.type]);
@@ -125,16 +156,49 @@ const Herencia = (p) => {
   function easeInOutQuad(t) {
     return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
   }
- 
-  const GROW_STEP = 0.06;   // velocidad de la animacion de aparicion
-  const TOLINE_STEP = 0.025; // velocidad del desplazamiento hacia la linea
-  const MERGE_STEP = 0.04;   // velocidad de la fusion de A y B hacia C
- 
   function easeInQuad(t) {
     return t * t;
   }
+  function easeOutQuad(t) {
+    return 1 - (1 - t) * (1 - t);
+  }
+ 
+  const GROW_STEP = 0.06;    // velocidad de la animacion de aparicion
+  const TOLINE_STEP = 0.025; // velocidad del desplazamiento hacia la linea
+  const MERGE_STEP = 0.04;   // velocidad de la fusion de A y B hacia C
+  const SHRINK_STEP = 0.08;  // velocidad del achicado al soltarse en C
  
   // ---------- fusion de A y B en C ----------
+  // arranca recien cuando ambas formas estan sueltas en C y ya terminaron
+  // su animacion de achicado a la mitad
+  function TryStartMerge() {
+    if (parentA.placed && parentB.placed && parentA.shrinkT >= 1 && parentB.shrinkT >= 1) {
+      startMerge();
+    }
+  }
+ 
+  function startMerge() {
+    const traits = inherit(parentA, parentB);
+    const centerX = (SNAP_A.x + SNAP_B.x) / 2;
+    const centerY = (SNAP_A.y + SNAP_B.y) / 2;
+ 
+    // A y B (ya reducidas a la mitad) viajan hacia C encogiendose del todo
+    // y desvaneciendose; recien al terminar esa fusion nace la forma hija
+    merging.push({
+      a: { type: parentA.type, color: parentA.color, x: parentA.x, y: parentA.y, startX: parentA.x, startY: parentA.y, size: parentA.size },
+      b: { type: parentB.type, color: parentB.color, x: parentB.x, y: parentB.y, startX: parentB.x, startY: parentB.y, size: parentB.size },
+      baseSize: parentA.size,
+      centerX,
+      centerY,
+      t: 0,
+      traits
+    });
+ 
+    // las formas padre desaparecen de A y B y nacen otras nuevas ahi
+    parentA = spawnShape('A');
+    parentB = spawnShape('B');
+  }
+ 
   function AnimateMerging() {
     for (let i = merging.length - 1; i >= 0; i--) {
       const m = merging[i];
@@ -185,7 +249,7 @@ const Herencia = (p) => {
  
       drawShape(c);
  
-      if (c.state === 'traveling' && c.x > p.width + c.size) {
+      if (c.state === 'traveling' && c.x > p.width + 100 + c.size) {
         children.splice(i, 1);
       }
     }
@@ -208,55 +272,35 @@ const Herencia = (p) => {
     });
   }
  
-  function tryBornChild() {
-    if (parentA.placed && parentB.placed) {
-      const traits = inherit(parentA, parentB);
-      const centerX = (SNAP_A.x + SNAP_B.x) / 2;
-      const centerY = (SNAP_A.y + SNAP_B.y) / 2;
- 
-      // A y B viajan hacia C encogiendose y desvaneciendose; recien al
-      // terminar esa fusion nace la forma hija (ver AnimateMerging)
-      merging.push({
-        a: { type: parentA.type, color: parentA.color, x: parentA.x, y: parentA.y, startX: parentA.x, startY: parentA.y, size: SHAPE_SIZE },
-        b: { type: parentB.type, color: parentB.color, x: parentB.x, y: parentB.y, startX: parentB.x, startY: parentB.y, size: SHAPE_SIZE },
-        baseSize: SHAPE_SIZE,
-        centerX,
-        centerY,
-        t: 0,
-        traits
-      });
- 
-      // las formas padre desaparecen de A y B y nacen otras nuevas ahi
-      parentA = spawnShape('A');
-      parentB = spawnShape('B');
-    }
-  }
- 
   // ---------- interaccion con el mouse ----------
   p.mousePressed = function() {
-    if (parentA && !parentA.placed && isOver(parentA, p.mouseX, p.mouseY)) {
+    const w = screenToWorld(p.mouseX, p.mouseY);
+    if (parentA && !parentA.placed && isOver(parentA, w.x, w.y)) {
       draggingShape = parentA;
-    } else if (parentB && !parentB.placed && isOver(parentB, p.mouseX, p.mouseY)) {
+    } else if (parentB && !parentB.placed && isOver(parentB, w.x, w.y)) {
       draggingShape = parentB;
     }
   }
  
   p.mouseDragged = function() {
     if (draggingShape) {
-      draggingShape.x = p.mouseX;
-      draggingShape.y = p.mouseY;
+      const w = screenToWorld(p.mouseX, p.mouseY);
+      draggingShape.x = w.x;
+      draggingShape.y = w.y;
     }
   }
  
   p.mouseReleased = function() {
     if (!draggingShape) return;
  
-    if (isOverRectC(p.mouseX, p.mouseY)) {
+    const w = screenToWorld(p.mouseX, p.mouseY);
+ 
+    if (isOverRectC(w.x, w.y)) {
       const snap = draggingShape.slot === 'A' ? SNAP_A : SNAP_B;
       draggingShape.x = snap.x;
       draggingShape.y = snap.y;
       draggingShape.placed = true;
-      tryBornChild();
+      draggingShape.shrinkT = 0; // arranca la animacion de achicado a la mitad
     } else {
       // si no se solto sobre C, vuelve a su rectangulo de origen
       const rect = draggingShape.slot === 'A' ? rectA : rectB;
