@@ -4,6 +4,7 @@ const Herencia = (p) => {
   let parentA, parentB;      // formas que estan en A y B
   let draggingShape = null;  // referencia a la forma que se esta arrastrando
   let children = [];         // formas hijas que viajan por la linea
+  let merging = [];          // fusiones en curso (A y B yendo hacia C)
  
   const TYPES = ['circle', 'square', 'triangle'];
   const COLORS = ['#F0D583', '#121212'];
@@ -27,11 +28,16 @@ const Herencia = (p) => {
  
   p.draw = function() {
     p.background('#970510');
- 
+    
+    p.push();
+    p.stroke('#F0D583');
+    p.strokeWeight(2);
     p.line(0, p.height / 2, p.width, p.height / 2);
+    p.pop();
  
     DrawRectZones();
     ParentShapesActions();
+    AnimateMerging();
     BornChildShape();
   }
  
@@ -69,7 +75,12 @@ const Herencia = (p) => {
   function drawShape(s) {
     p.push();
     p.noStroke();
-    p.fill(s.color);
+    if (s.alpha !== undefined) {
+      const col = p.color(s.color);
+      p.fill(p.red(col), p.green(col), p.blue(col), s.alpha);
+    } else {
+      p.fill(s.color);
+    }
     if (s.type === 'circle') {
       p.ellipse(s.x, s.y, s.size, s.size);
     } else if (s.type === 'square') {
@@ -105,30 +116,117 @@ const Herencia = (p) => {
     return { type, color };
   }
  
+  // easings para las animaciones
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+  function easeInOutQuad(t) {
+    return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  }
+ 
+  const GROW_STEP = 0.06;   // velocidad de la animacion de aparicion
+  const TOLINE_STEP = 0.025; // velocidad del desplazamiento hacia la linea
+  const MERGE_STEP = 0.04;   // velocidad de la fusion de A y B hacia C
+ 
+  function easeInQuad(t) {
+    return t * t;
+  }
+ 
+  // ---------- fusion de A y B en C ----------
+  function AnimateMerging() {
+    for (let i = merging.length - 1; i >= 0; i--) {
+      const m = merging[i];
+      m.t = Math.min(1, m.t + MERGE_STEP);
+      const e = easeInQuad(m.t);
+ 
+      m.a.x = p.lerp(m.a.startX, m.centerX, e);
+      m.a.y = p.lerp(m.a.startY, m.centerY, e);
+      m.a.size = m.baseSize * (1 - e);
+      m.a.alpha = 255 * (1 - e);
+ 
+      m.b.x = p.lerp(m.b.startX, m.centerX, e);
+      m.b.y = p.lerp(m.b.startY, m.centerY, e);
+      m.b.size = m.baseSize * (1 - e);
+      m.b.alpha = 255 * (1 - e);
+ 
+      drawShape(m.a);
+      drawShape(m.b);
+ 
+      if (m.t >= 1) {
+        spawnChild(m.centerX, m.centerY, m.traits);
+        merging.splice(i, 1);
+      }
+    }
+  }
+ 
   function BornChildShape() {
     for (let i = children.length - 1; i >= 0; i--) {
       const c = children[i];
-      c.x += c.speed;
+ 
+      if (c.state === 'growing') {
+        c.growT = Math.min(1, c.growT + GROW_STEP);
+        c.size = c.baseSize * easeOutBack(c.growT);
+        if (c.growT >= 1) {
+          c.size = c.baseSize;
+          c.state = 'toLine';
+        }
+      } else if (c.state === 'toLine') {
+        c.moveT = Math.min(1, c.moveT + TOLINE_STEP);
+        c.y = p.lerp(c.startY, c.targetY, easeInOutQuad(c.moveT));
+        if (c.moveT >= 1) {
+          c.y = c.targetY;
+          c.state = 'traveling';
+        }
+      } else if (c.state === 'traveling') {
+        c.x += c.speed;
+      }
+ 
       drawShape(c);
-      if (c.x > p.width + c.size) {
+ 
+      if (c.state === 'traveling' && c.x > p.width + c.size) {
         children.splice(i, 1);
       }
     }
   }
  
+  function spawnChild(x, y, traits) {
+    children.push({
+      type: traits.type,
+      color: traits.color,
+      x: x,
+      y: y,
+      startY: y,
+      targetY: p.height / 2,
+      baseSize: SHAPE_SIZE,
+      size: 0,
+      growT: 0,
+      moveT: 0,
+      state: 'growing',
+      speed: 2
+    });
+  }
+ 
   function tryBornChild() {
     if (parentA.placed && parentB.placed) {
       const traits = inherit(parentA, parentB);
-      children.push({
-        type: traits.type,
-        color: traits.color,
-        x: (SNAP_A.x + SNAP_B.x) / 2,
-        y: p.height / 2,
-        size: SHAPE_SIZE,
-        speed: 2
+      const centerX = (SNAP_A.x + SNAP_B.x) / 2;
+      const centerY = (SNAP_A.y + SNAP_B.y) / 2;
+ 
+      // A y B viajan hacia C encogiendose y desvaneciendose; recien al
+      // terminar esa fusion nace la forma hija (ver AnimateMerging)
+      merging.push({
+        a: { type: parentA.type, color: parentA.color, x: parentA.x, y: parentA.y, startX: parentA.x, startY: parentA.y, size: SHAPE_SIZE },
+        b: { type: parentB.type, color: parentB.color, x: parentB.x, y: parentB.y, startX: parentB.x, startY: parentB.y, size: SHAPE_SIZE },
+        baseSize: SHAPE_SIZE,
+        centerX,
+        centerY,
+        t: 0,
+        traits
       });
  
-      // las formas padre desaparecen y nacen otras nuevas en A y B
+      // las formas padre desaparecen de A y B y nacen otras nuevas ahi
       parentA = spawnShape('A');
       parentB = spawnShape('B');
     }
