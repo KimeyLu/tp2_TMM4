@@ -1,28 +1,28 @@
 const Herencia = (p) => {
   // ---------- variables necesarias ----------
   let rectA, rectB, rectC;
-  let parentA, parentB;      // formas que estan en A y B
+  let parentA, parentB;      // formas que estan en los rect A y B (padres)
   let draggingShape = null;  // referencia a la forma que se esta arrastrando
   let children = [];         // formas hijas que viajan por la linea
   let merging = [];          // fusiones en curso (A y B yendo hacia C)
  
   const TYPES = ['circle', 'square', 'triangle'];
   const COLORS = ['#F0D583', '#121212'];
-  const SHAPE_SIZE = 36;
+  const SHAPE_SIZE = 24;
  
   // posiciones fijas donde quedan las formas al soltarlas en C
-  const SNAP_A = { x: 150, y: 128 };
-  const SNAP_B = { x: 240, y: 128 };
+  const SNAP_A = { x: 150, y: 138 };
+  const SNAP_B = { x: 240, y: 138 };
  
-  const ROTATION_DEG = -40; // angulo de rotacion de todo el sketch
+  const ROTATION_DEG = -43; // angulo de rotacion de todo el sketch
  
   p.setup = function() {
     p.createCanvas(400, 400);
     p.rectMode(p.CORNER);
  
-    rectA = { x: p.width / 5, y: p.height / 5, w: 50, h: 50 };
-    rectC = { x: p.width / 2.3, y: p.height / 4, w: 50, h: 50 };
-    rectB = { x: p.width / 1.5, y: p.height / 5, w: 50, h: 50 };
+    rectA = { x: p.width / 5, y: p.height / 4.7, w: 50, h: 50 };
+    rectC = { x: p.width / 2.3, y: p.height / 3.5, w: 50, h: 50 };
+    rectB = { x: p.width / 1.5, y: p.height / 4.7, w: 50, h: 50 };
  
     parentA = spawnShape('A');
     parentB = spawnShape('B');
@@ -35,8 +35,12 @@ const Herencia = (p) => {
     p.translate(p.width / 2, p.height / 2);
     p.rotate(p.radians(ROTATION_DEG));
     p.translate(-p.width / 2, -p.height / 2);
- 
+    
+    //push();
+    p.stroke('#F0D583');
+    p.strokeWeight(2);
     p.line(-100, p.height / 2, p.width + 100, p.height / 2);
+    //pop();
  
     DrawRectZones();
     ParentShapesActions();
@@ -259,7 +263,7 @@ const Herencia = (p) => {
     children.push({
       type: traits.type,
       color: traits.color,
-      x: x,
+      x: x+5,
       y: y,
       startY: y,
       targetY: p.height / 2,
