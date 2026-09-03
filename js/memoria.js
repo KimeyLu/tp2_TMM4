@@ -4,7 +4,7 @@ const Memoria = (p) => {
     let lineY;
     let shapes = [];       // formas que recorren la linea
     let memories = [];     // clones guardados al costado de la linea
-    let leavingItems = [];  // clones en proceso de desaparecer (animacion FIFO)
+    let fadingOut = [];     // clones desvaneciendose al reiniciar la memoria
  
     const COLORS = ['#F0D583', '#121212'];
     const TYPES = ['triangle', 'rect', 'circle'];
@@ -19,6 +19,17 @@ const Memoria = (p) => {
     let cursorColor = '#F0D583';
     let hitTimer = 0;
     const HIT_DURATION = 18; // frames que dura la animacion de "achique"
+ 
+    // memoria: 3 columnas, 4 formas por columna
+    const MEMORY_COLS = 3;
+    const MEMORY_ROWS = 4;
+    const MEMORY_CAPACITY = MEMORY_COLS * MEMORY_ROWS;
+    const MEMORY_START_X = 120;
+    let MEMORY_START_Y; // depende de p.height, se asigna en setup (createCanvas define p.height recien ahi)
+    const MEMORY_COL_SPACING = 80; // distancia horizontal entre columnas
+    const MEMORY_ROW_SPACING = 22; // distancia vertical entre formas de una misma columna
+    const SLIDE_EASE = 0.2; // suaviza la aparicion de cada clon en su lugar
+    const RESET_FADE_DURATION = 30; // frames que tardan en desvanecerse al reiniciar
  
     p.setup = function() {
         p.createCanvas(400, 400);
@@ -42,7 +53,7 @@ const Memoria = (p) => {
  
         p.stroke('#F0D583');
         p.strokeWeight(2);
-        p.line(-100, lineY, p.width+100, lineY);
+        p.line(-100, lineY, p.width + 100, lineY);
  
         DrawShapes();
         ShapeMemory();
@@ -102,7 +113,7 @@ const Memoria = (p) => {
         for (let s of shapes) {
             let cyclePos = (s.offset + travel) % WRAP_LEN;
             let cycleCount = Math.floor((s.offset + travel) / WRAP_LEN);
-            s.x = cyclePos - 100; //posicion en que inician las formas, aparecen, principio
+            s.x = cyclePos - 100; // posicion en que inician las formas, aparecen, principio
  
             // al arrancar un nuevo ciclo, se reasignan tipo y color
             // y se habilita de nuevo la posibilidad de generar un clon
@@ -141,17 +152,6 @@ const Memoria = (p) => {
         p.pop();
     }
  
-    const MEMORY_COLS = 3;
-    const MEMORY_ROWS = 4;
-    const MEMORY_CAPACITY = MEMORY_COLS * MEMORY_ROWS;
-    const MEMORY_START_X = 120;
-    let MEMORY_START_Y; // depende de p.height, se asigna en setup, *porque esto esta asi??
-    const MEMORY_COL_SPACING = 80; // distancia horizontal entre columnas
-    const MEMORY_ROW_SPACING = 22; // distancia vertical entre formas de una misma columna
-    const SLIDE_EASE = 0.2;      // velocidad del reacomodo de los que se quedan
-    const LEAVE_DURATION = 30;   // frames que dura la animacion de salida
-    const LEAVE_RISE = 30;       // cuanto sube (px) el que se va
- 
     function slotPos(i) {
         let col = Math.floor(i / MEMORY_ROWS);
         let row = i % MEMORY_ROWS;
@@ -159,7 +159,8 @@ const Memoria = (p) => {
     }
  
     function ShapeMemory() {
-        // clones activos: 3 columnas, 4 formas por columna, con reacomodo suave
+        // clones guardados: 3 columnas, 4 formas por columna, con
+        // reacomodo suave hacia su lugar (misma logica grafica del sketch)
         for (let i = 0; i < memories.length; i++) {
             let m = memories[i];
             let target = slotPos(i);
@@ -168,16 +169,15 @@ const Memoria = (p) => {
             drawShapeAt(m.dispX, m.dispY, m.size, m.type, m.color);
         }
  
-        // clones saliendo (First In): suben y se desvanecen antes de desaparecer
-        for (let i = leavingItems.length - 1; i >= 0; i--) {
-            let m = leavingItems[i];
-            m.leaveTimer--;
-            let progress = 1 - (m.leaveTimer / LEAVE_DURATION); // 0 -> 1
-            let y = m.startY - progress * LEAVE_RISE;
-            let alpha = 255 * (1 - progress);
-            drawShapeAt(m.startX, y, m.size, m.type, m.color, alpha);
-            if (m.leaveTimer <= 0) {
-                leavingItems.splice(i, 1);
+        // clones del reset anterior: se quedan quietos en su lugar
+        // y se van desvaneciendo hasta desaparecer
+        for (let i = fadingOut.length - 1; i >= 0; i--) {
+            let f = fadingOut[i];
+            f.fadeTimer--;
+            let alpha = 255 * (f.fadeTimer / RESET_FADE_DURATION);
+            drawShapeAt(f.x, f.y, f.size, f.type, f.color, alpha);
+            if (f.fadeTimer <= 0) {
+                fadingOut.splice(i, 1);
             }
         }
     }
@@ -195,14 +195,20 @@ const Memoria = (p) => {
                 hitTimer = HIT_DURATION;
                 s.clicked = true; // ya generó su clon, no puede generar otro hasta el proximo ciclo
  
-                // FIFO: si ya esta llena la memoria, el mas viejo (First In)
-                // pasa a animarse hacia arriba y desvanecerse en vez de borrarse de golpe
+                // reset: si ya esta llena la memoria, los clones actuales se
+                // desvanecen en su lugar en vez de borrarse de golpe
                 if (memories.length >= MEMORY_CAPACITY) {
-                    let removed = memories.shift();
-                    removed.leaveTimer = LEAVE_DURATION;
-                    removed.startX = removed.dispX; // se congela donde estaba, sin saltos
-                    removed.startY = removed.dispY;
-                    leavingItems.push(removed);
+                    for (let old of memories) {
+                        fadingOut.push({
+                            size: old.size,
+                            type: old.type,
+                            color: old.color,
+                            x: old.dispX,
+                            y: old.dispY,
+                            fadeTimer: RESET_FADE_DURATION
+                        });
+                    }
+                    memories = [];
                 }
  
                 let idx = memories.length;
@@ -211,9 +217,10 @@ const Memoria = (p) => {
                     size: s.size * 0.5,
                     type: s.type,
                     color: s.color,
-                    dispX: pos.x, // nace ya en su posicion final
+                    dispX: pos.x, // nace ya en su posicion final, sin animacion de entrada
                     dispY: pos.y
                 });
+ 
                 break; // solo la primera forma tocada
             }
         }
