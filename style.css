@@ -85,8 +85,6 @@ html, body {
   display: block;
 }
 
-/* Cuando el item está expandido, el canvas pasa a ocupar toda la pantalla.
-   incertidumbre queda afuera de esta lista a propósito (ver regla debajo). */
 .item.expanded #memoria canvas,
 .item.expanded #herencia canvas,
 .item.expanded #caducidad canvas,
@@ -94,19 +92,10 @@ html, body {
 .item.expanded #identidad canvas,
 .item.expanded #empatia canvas,
 .item.expanded #expectativa canvas,
+.item.expanded #incertidumbre canvas,
 .item.expanded #ansiedad canvas {
   width: 100vw !important;
   height: 100vh !important;
-}
-
-/* incertidumbre mantiene su canvas a resolución fija (400x400) a propósito
-   (para no romper el balance del juego procedural), así que acá solo lo
-   agrandamos manteniendo el cuadrado, sin estirarlo ni deformarlo */
-.item.expanded #incertidumbre canvas {
-  width: auto !important;
-  height: auto !important;
-  max-width: 100vmin !important;
-  max-height: 100vmin !important;
 }
 
 .titulo {

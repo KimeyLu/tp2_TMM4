@@ -1,663 +1,371 @@
 /* ============================================================
-   INCERTIDUMBRE
-   ------------------------------------------------------------
-   El jugador (circulo rojo) siempre esta anclado a un borde de
-   un cuadrado rojo rotado y gigante. Mantener click estira un
-   cable elastico; si otro borde entra en rango, la conexion se
-   transfiere instantaneamente. La bolita NUNCA sale del area
-   visible de pantalla (clamp en coordenadas de pantalla).
-
-   Entre cada par de cuadrados rojos aparece una "compuerta"
-   amarilla estilo flappy bird: una barra arriba y otra abajo,
-   con un hueco en el medio por donde hay que pasar.
-   - Compuertas seguras: el hueco queda fijo, se puede pasar.
-   - Compuertas peligrosas: las barras se cierran de golpe en
-     el centro (choque rapido) y si te toc640an mientras se cierran,
-     mueren. Visualmente son iguales hasta que empiezan a moverse:
-     esa es la incertidumbre.
-
-   ------------------------------------------------------------
-   MODO INSTANCIA: todo el sketch vive dentro del closure
-   `sketchIncertidumbre`, para poder correr junto a otros sketches
-   de p5 en la misma pagina sin pisarse variables globales.
-   Se monta automaticamente en el div con id="incertidumbre".
+   INCERTIDUMBRE 
    ============================================================ */
 
 const sketchIncertidumbre = (p) => {
-    // ---------- COLORES / ESTILO ----------
-    const COLOR_BG = [14, 14, 14];
-    const COLOR_SQUARE = [190, 45, 45];
-    const COLOR_GATE = [232, 217, 154];
-    const COLOR_PLAYER = [224, 40, 40];
-    const COLOR_CABLE = [190, 45, 45, 160];
-    const COLOR_NORMAL_LINE = [190, 45, 45, 90];
+  const COLOR_BG = '#141414';
+  const COLOR_RED = '#970511';
+  const COLOR_CREAM = '#EFD583';
 
-    // ---------- HUD (creado dinamicamente, dentro del contenedor) ----------
-    let hudEl, distTxtEl, msgEl, containerEl;
+  const IDLE_SPEED = 0.02;
+  const IDLE_AMP = 4;
 
-    function buildHUD(container) {
-        containerEl = container;
-        containerEl.style.position = "relative";
-        containerEl.style.overflow = "hidden";
-        containerEl.style.background = "#0a0a0a";
-        containerEl.style.fontFamily = '"Courier New", monospace';
-        containerEl.style.lineHeight = "1";
+  const FOLLOW_EASE = 0.28;   // qué tan rápido el círculo sigue al dedo/mouse mientras se arrastra
+  const RETRACT_EASE = 0.18;  // qué tan rápido vuelve a su anclaje al soltar
+  const CONNECT_FACTOR = 0.22; // qué tan cerca (relativo al tamaño del canvas) hay que arrastrar de OTRO cuadrado para transferirse
 
-        const style = document.createElement("style");
-        style.textContent = `
-            #${container.id} canvas {
-                display: block;
-            }
-            #${container.id} .hud {
-                position: absolute;
-                top: 16px;
-                left: 20px;
-                color: #d94040;
-                font-size: 13px;
-                letter-spacing: 2px;
-                text-transform: lowercase;
-                pointer-events: none;
-                z-index: 10;
-            }
-            #${container.id} .hud .dist {
-                color: #e8d99a;
-                margin-top: 4px;
-            }
-            #${container.id} .msg {
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                color: #e8d99a;
-                font-size: 15px;
-                letter-spacing: 3px;
-                text-transform: lowercase;
-                text-align: center;
-                pointer-events: none;
-                z-index: 10;
-                opacity: 0;
-                transition: opacity 0.4s;
-            }
-        `;
-        document.head.appendChild(style);
+  const GATE_CLOSE_MS = 140;
+  const GATE_HOLD_MS = 260;
+  const GATE_REOPEN_MS = 320;
+  const GATE_EXTEND_FACTOR = 2.6; // cuánto se alarga la barra al cerrarse
+  const GATE_MIN_INTERVAL = 1800;
+  const GATE_MAX_INTERVAL = 3600;
+  const GATE_DANGER_FROM = 0.55; // a partir de qué tan "cerrada" (0-1) ya puede romper al círculo
 
-        hudEl = document.createElement("div");
-        hudEl.className = "hud";
-        // hudEl.appendChild(document.createTextNode("incertidumbre"));
-        //
-        distTxtEl = document.createElement("div");
-        distTxtEl.className = "dist";
-        // hudEl.appendChild(distTxtEl);
+  const DEATH_MS = 420;
 
-        msgEl = document.createElement("div");
-        // msgEl.className = "msg";
+  let size; // min(width, height): referencia de escala para todo
+  let squares = []; // los dos cuadrados rojos (bases)
+  let gates = [];    // las dos barras crema
+  let player;
+  let dragging = false;
+  let activePointer = null; // 'mouse' o el id de un touch
+  let pointerPos = { x: 0, y: 0 };
+  let nextGateEventTimer = 0;
 
-        containerEl.appendChild(hudEl);
-        containerEl.appendChild(msgEl);
+  p.setup = () => {
+    p.createCanvas(400, 400);
+    buildScene(false);
+  };
+
+  p.windowResized = () => {
+    const { w, h } = window.getCanvasTargetSize('incertidumbre', 400, 400);
+    p.resizeCanvas(w, h);
+    buildScene(true);
+  };
+
+  function buildScene(keepPlayer) {
+    size = Math.min(p.width, p.height);
+
+    // dos cuadrados en la diagonal "/" (arriba-derecha y abajo-izquierda)
+    squares = [
+      makeSquare(p.width * 0.74, p.height * 0.26, size * 0.30, p.radians(45)),
+      makeSquare(p.width * 0.26, p.height * 0.74, size * 0.30, p.radians(45))
+    ];
+
+    // dos barras en la diagonal "\" (arriba-izquierda y abajo-derecha)
+    gates = [
+      makeGate(p.width * 0.20, p.height * 0.20, size * 0.34, size * 0.11, p.radians(45)),
+      makeGate(p.width * 0.80, p.height * 0.80, size * 0.34, size * 0.11, p.radians(45))
+    ];
+
+    if (!keepPlayer || !player) {
+      player = makePlayer(0, 0);
+    } else {
+      // reubica al jugador en el mismo cuadrado/borde que tenía, con la nueva geometría
+      const edges = squareEdges(squares[player.squareIndex]);
+      const anchor = midpoint(edges[player.edgeIndex].a, edges[player.edgeIndex].b);
+      player.anchor = anchor;
+      player.pos = { x: anchor.x, y: anchor.y };
     }
 
-    // ---------- ESCALA (fija, en base al canvas de 600x600) ----------
-    let SQUARE_SIZE, MIN_DIST, MAX_DIST, MAX_CABLE, CONNECT_THRESH;
-    let GATE_GAP,
-        GATE_BAR_LEN,
-        GATE_WIDTH,
-        GATE_TRIGGER_DIST,
-        SCREEN_MARGIN;
+    scheduleNextGateEvent();
+  }
 
-    const ELASTIC_SPEED = 0.35; // suavizado del estiramiento del cable
-    const RETRACT_SPEED = 0.45; // suavizado del retorno al anclaje al soltar
-    const GEN_AHEAD_MULT = 3.2; // generar mundo esta cantidad de "distancias" adelante
-    const REMOVE_BEHIND = 500; // borrar nodos detras de la camara
+  // ---------- geometría de los cuadrados ----------
+  function makeSquare(cx, cy, side, rot) {
+    return { cx, cy, side, rot, phase: p.random(1000) };
+  }
 
-    let world;
-    let player;
-    let cam;
-    let dragging = false;
-    let gameOver = false;
-    let started = false;
-    let maxDistReached = 0;
-
-    function computeScale() {
-        const base = Math.min(p.width, p.height);
-        SQUARE_SIZE = base * 0.5; // cuadrados rojos gigantes
-        MIN_DIST = SQUARE_SIZE * 2.8; // mas separacion entre cuadrados rojos
-        MAX_DIST = SQUARE_SIZE * 2.8;
-        MAX_CABLE = Math.hypot(p.width, p.height) * 0.6;
-        CONNECT_THRESH = SQUARE_SIZE * 0.42;
-        GATE_GAP = SQUARE_SIZE * 0.95; // hueco de paso de la compuerta
-        GATE_BAR_LEN = SQUARE_SIZE * 1.6; // largo finito: ya no cruza toda la pantalla
-        GATE_WIDTH = SQUARE_SIZE * 0.3;
-        GATE_TRIGGER_DIST = SQUARE_SIZE * 0.85; // distancia a la que la compuerta peligrosa "detecta" al jugador y se cierra
-        SCREEN_MARGIN = base * 0.06;
-    }
-
-    // ---------- UTILIDADES DE GEOMETRIA ----------
-
-    function localToWorld(cx, cy, rot, lx, ly) {
-        const cosA = Math.cos(rot),
-            sinA = Math.sin(rot);
-        return {
-            x: cx + (lx * cosA - ly * sinA),
-            y: cy + (lx * sinA + ly * cosA),
-        };
-    }
-
-    function closestPointOnSegment(pt, a, b) {
-        const abx = b.x - a.x,
-            aby = b.y - a.y;
-        const apx = pt.x - a.x,
-            apy = pt.y - a.y;
-        const lenSq = abx * abx + aby * aby;
-        let t = lenSq === 0 ? 0 : (apx * abx + apy * aby) / lenSq;
-        t = Math.max(0, Math.min(1, t));
-        const cx = a.x + abx * t,
-            cy = a.y + aby * t;
-        const dx = pt.x - cx,
-            dy = pt.y - cy;
-        return {
-            point: { x: cx, y: cy },
-            dist: Math.sqrt(dx * dx + dy * dy),
-        };
-    }
-
-    // colision circulo contra rectangulo axis-aligned definido por esquinas x1<x2, y1<y2
-    function rectCircleCollide(rect, px, py, r) {
-        const cx = Math.max(rect.x1, Math.min(px, rect.x2));
-        const cy = Math.max(rect.y1, Math.min(py, rect.y2));
-        const dx = px - cx,
-            dy = py - cy;
-        return dx * dx + dy * dy < r * r;
-    }
-
-    // ---------- NODO ROJO (cuadrado rotado, punto de anclaje real) ----------
-    class RedSquare {
-        constructor(x, y, rot) {
-            this.x = x;
-            this.y = y;
-            this.size = SQUARE_SIZE;
-            this.rot = rot;
-        }
-
-        getCorners() {
-            const h = this.size / 2;
-            const local = [
-                [-h, -h],
-                [h, -h],
-                [h, h],
-                [-h, h],
-            ];
-            return local.map(([lx, ly]) =>
-                localToWorld(this.x, this.y, this.rot, lx, ly),
-            );
-        }
-
-        getEdges() {
-            const c = this.getCorners();
-            const localNormals = [
-                [0, -1],
-                [1, 0],
-                [0, 1],
-                [-1, 0],
-            ];
-            const cosA = Math.cos(this.rot),
-                sinA = Math.sin(this.rot);
-            const edges = [];
-            for (let i = 0; i < 4; i++) {
-                const a = c[i],
-                    b = c[(i + 1) % 4];
-                const [nx, ny] = localNormals[i];
-                const normal = {
-                    x: nx * cosA - ny * sinA,
-                    y: nx * sinA + ny * cosA,
-                };
-                edges.push({ a, b, normal, square: this, index: i });
-            }
-            return edges;
-        }
-
-        draw(camX, camY) {
-            p.push();
-            p.translate(this.x - camX, this.y - camY);
-            p.rotate(this.rot);
-            p.noFill();
-            p.stroke(...COLOR_SQUARE);
-            p.strokeWeight(2);
-            p.rectMode(p.CENTER);
-            p.rect(0, 0, this.size, this.size);
-            p.pop();
-        }
-    }
-
-    // ---------- COMPUERTA AMARILLA (se cierra al acercarte, no por ciclo) ----------
-    class YellowGate {
-        constructor(x, y, angle, dangerous) {
-            this.x = x;
-            this.y = y;
-            this.angle = angle; // orientacion: perpendicular a esto es por donde se pasa
-            this.dangerous = dangerous;
-
-            // tiempos del cierre: MUY rapido para generar incertidumbre repentina
-            this.closeDuration = 130; // ms: se cierra de golpe
-            this.holdClosedDuration = 220; // ms: se mantiene cerrada
-            this.reopenDuration = 260; // ms: vuelve a abrirse
-
-            this.triggered = false; // se activo el cierre alguna vez
-            this.triggerTime = 0; // millis() en que empezo a cerrarse
-        }
-
-        // revisa si el jugador esta lo bastante cerca del hueco como para activar el cierre.
-        // solo las compuertas peligrosas reaccionan; las seguras quedan siempre estaticas y abiertas.
-        checkTrigger(px, py) {
-            if (!this.dangerous || this.triggered) return;
-            const dx = px - this.x,
-                dy = py - this.y;
-            if (
-                dx * dx + dy * dy <
-                GATE_TRIGGER_DIST * GATE_TRIGGER_DIST
-            ) {
-                this.triggered = true;
-                this.triggerTime = p.millis();
-            }
-        }
-
-        // hueco actual: estatico y abierto hasta que se dispara el cierre por proximidad,
-        // luego cierra rapido, se mantiene cerrada un instante y reabre.
-        currentGap() {
-            if (!this.dangerous || !this.triggered) return GATE_GAP;
-            const elapsed = p.millis() - this.triggerTime;
-            if (elapsed < this.closeDuration) {
-                return GATE_GAP * (1 - elapsed / this.closeDuration);
-            }
-            if (
-                elapsed <
-                this.closeDuration + this.holdClosedDuration
-            ) {
-                return 0;
-            }
-            const reopenElapsed =
-                elapsed - this.closeDuration - this.holdClosedDuration;
-            if (reopenElapsed < this.reopenDuration) {
-                return GATE_GAP * (reopenElapsed / this.reopenDuration);
-            }
-            return GATE_GAP; // totalmente reabierta, queda estatica de nuevo
-        }
-
-        // pasa un punto del mundo al sistema local de la compuerta:
-        // eje local X = direccion de paso (a lo largo del camino), eje local Y = perpendicular (donde se separan las barras)
-        toLocal(px, py) {
-            const dx = px - this.x,
-                dy = py - this.y;
-            const cosA = Math.cos(-this.angle),
-                sinA = Math.sin(-this.angle);
-            return {
-                x: dx * cosA - dy * sinA,
-                y: dx * sinA + dy * cosA,
-            };
-        }
-
-        // solo las compuertas peligrosas matan; las seguras se pueden tocar sin problema.
-        // colision hecha en coordenadas locales rotadas, contra las dos barras (arriba/abajo del hueco).
-        checkCollision(px, py, r) {
-            if (!this.dangerous) return false;
-            const gap = this.currentGap();
-            const half = gap / 2;
-            const local = this.toLocal(px, py);
-
-            for (const sign of [1, -1]) {
-                const yMin = sign > 0 ? half : -(half + GATE_BAR_LEN);
-                const yMax = sign > 0 ? half + GATE_BAR_LEN : -half;
-                const cx = Math.max(
-                    -GATE_WIDTH / 2,
-                    Math.min(local.x, GATE_WIDTH / 2),
-                );
-                const cy = Math.max(yMin, Math.min(local.y, yMax));
-                const dx = local.x - cx,
-                    dy = local.y - cy;
-                if (dx * dx + dy * dy < r * r) return true;
-            }
-            return false;
-        }
-
-        draw(camX, camY) {
-            const gap = this.currentGap();
-            const half = gap / 2;
-            p.push();
-            p.translate(this.x - camX, this.y - camY);
-            p.rotate(this.angle);
-            p.noStroke();
-            p.fill(...COLOR_GATE);
-            p.rectMode(p.CORNER);
-            p.rect(-GATE_WIDTH / 2, half, GATE_WIDTH, GATE_BAR_LEN);
-            p.rect(
-                -GATE_WIDTH / 2,
-                -(half + GATE_BAR_LEN),
-                GATE_WIDTH,
-                GATE_BAR_LEN,
-            );
-            p.pop();
-        }
-    }
-
-    // ---------- MUNDO PROCEDURAL ----------
-    class World {
-        constructor() {
-            this.redSquares = [];
-            this.gates = [];
-            this.generateInitial();
-        }
-
-        generateInitial() {
-            const first = new RedSquare(0, p.height / 2, 0);
-            this.redSquares.push(first);
-            this.generateAhead();
-        }
-
-        generateAhead() {
-            // franja vertical segura: como la camara ya no se mueve en Y, los cuadrados
-            // rojos tienen que quedarse siempre dentro de la altura fija de la pantalla.
-            const vMargin = SQUARE_SIZE * 0.75 + SCREEN_MARGIN;
-            const vMin = vMargin;
-            const vMax = p.height - vMargin;
-
-            while (true) {
-                const last =
-                    this.redSquares[this.redSquares.length - 1];
-                if (last.x > player.maxXGenTarget()) break;
-
-                const centerPull = (p.height / 2 - last.y) * 0.01; // empuje mas fuerte hacia el centro
-                const angle = p.random(-p.PI / 9, p.PI / 9) + centerPull; // camino mas horizontal, mas seguro
-                const dist = p.random(MIN_DIST, MAX_DIST);
-
-                const nx = last.x + Math.cos(angle) * dist;
-                let ny = last.y + Math.sin(angle) * dist;
-                ny = Math.max(vMin, Math.min(vMax, ny)); // nunca se genera fuera de la franja fija
-                const nrot = p.random(0, p.TWO_PI);
-
-                const next = new RedSquare(nx, ny, nrot);
-                this.redSquares.push(next);
-
-                // compuerta amarilla a mitad de camino, con el hueco alineado al recorrido real
-                const midX = (last.x + nx) / 2;
-                const midY = (last.y + ny) / 2;
-                const realAngle = Math.atan2(ny - last.y, nx - last.x);
-                const dangerous = p.random() < 0.5;
-                this.gates.push(
-                    new YellowGate(midX, midY, realAngle, dangerous),
-                );
-            }
-        }
-
-        removeOld(camX) {
-            this.redSquares = this.redSquares.filter(
-                (s) => s.x > camX - REMOVE_BEHIND,
-            );
-            this.gates = this.gates.filter(
-                (g) => g.x > camX - REMOVE_BEHIND,
-            );
-        }
-
-        update(camX) {
-            this.generateAhead();
-            this.removeOld(camX);
-        }
-
-        allRedEdges() {
-            let edges = [];
-            for (const s of this.redSquares)
-                edges = edges.concat(s.getEdges());
-            return edges;
-        }
-
-        draw(camX, camY) {
-            for (const s of this.redSquares) s.draw(camX, camY);
-            for (const g of this.gates) g.draw(camX, camY);
-        }
-    }
-
-    // ---------- JUGADOR ----------
-    class Player {
-        constructor(square, edgeIndex) {
-            const edges = square.getEdges();
-            const e = edges[edgeIndex];
-            const mid = {
-                x: (e.a.x + e.b.x) / 2,
-                y: (e.a.y + e.b.y) / 2,
-            };
-
-            this.anchor = mid;
-            this.anchorNormal = e.normal;
-            this.attachedSquare = square;
-            this.attachedEdgeIndex = edgeIndex;
-
-            this.pos = { x: mid.x, y: mid.y };
-            this.r = Math.max(6, SQUARE_SIZE * 0.045);
-        }
-
-        maxXGenTarget() {
-            return this.pos.x + MAX_DIST * GEN_AHEAD_MULT;
-        }
-
-        tryTransfer(edges) {
-            let best = null;
-            let bestDist = CONNECT_THRESH;
-            for (const e of edges) {
-                if (
-                    e.square === this.attachedSquare &&
-                    e.index === this.attachedEdgeIndex
-                )
-                    continue;
-                const { point, dist } = closestPointOnSegment(
-                    this.pos,
-                    e.a,
-                    e.b,
-                );
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    best = { point, edge: e };
-                }
-            }
-            if (best) {
-                this.anchor = best.point;
-                this.anchorNormal = best.edge.normal;
-                this.attachedSquare = best.edge.square;
-                this.attachedEdgeIndex = best.edge.index;
-                return true;
-            }
-            return false;
-        }
-
-        update(mouseWorld, isDragging, edges) {
-            if (isDragging) {
-                let dx = mouseWorld.x - this.anchor.x;
-                let dy = mouseWorld.y - this.anchor.y;
-                const len = Math.sqrt(dx * dx + dy * dy);
-                let target;
-                if (len > MAX_CABLE) {
-                    const s = MAX_CABLE / len;
-                    target = {
-                        x: this.anchor.x + dx * s,
-                        y: this.anchor.y + dy * s,
-                    };
-                } else {
-                    target = { x: mouseWorld.x, y: mouseWorld.y };
-                }
-                this.pos.x += (target.x - this.pos.x) * ELASTIC_SPEED;
-                this.pos.y += (target.y - this.pos.y) * ELASTIC_SPEED;
-                this.tryTransfer(edges);
-            } else {
-                this.pos.x +=
-                    (this.anchor.x - this.pos.x) * RETRACT_SPEED;
-                this.pos.y +=
-                    (this.anchor.y - this.pos.y) * RETRACT_SPEED;
-            }
-        }
-
-        // la bolita nunca puede salir del area visible: se limita en coordenadas de pantalla
-        clampToScreen(cam) {
-            let sx = this.pos.x - cam.x;
-            let sy = this.pos.y - cam.y;
-            sx = Math.max(
-                SCREEN_MARGIN,
-                Math.min(p.width - SCREEN_MARGIN, sx),
-            );
-            sy = Math.max(
-                SCREEN_MARGIN,
-                Math.min(p.height - SCREEN_MARGIN, sy),
-            );
-            this.pos.x = sx + cam.x;
-            this.pos.y = sy + cam.y;
-        }
-
-        draw(camX, camY, isDragging) {
-            if (isDragging) {
-                p.stroke(...COLOR_CABLE);
-                p.strokeWeight(1.5);
-                p.line(
-                    this.anchor.x - camX,
-                    this.anchor.y - camY,
-                    this.pos.x - camX,
-                    this.pos.y - camY,
-                );
-
-                const nx = this.anchorNormal.x,
-                    ny = this.anchorNormal.y;
-                p.stroke(...COLOR_NORMAL_LINE);
-                p.line(
-                    this.anchor.x - camX,
-                    this.anchor.y - camY,
-                    this.anchor.x - camX + nx * 16,
-                    this.anchor.y - camY + ny * 16,
-                );
-            }
-            p.noStroke();
-            p.fill(...COLOR_PLAYER);
-            p.circle(this.pos.x - camX, this.pos.y - camY, this.r * 2);
-        }
-    }
-
-    // ---------- SETUP / GAME FLOW ----------
-    function resetGame() {
-        computeScale();
-        world = null;
-        player = null;
-        gameOver = false;
-        dragging = false;
-        maxDistReached = 0;
-
-        const seed = new RedSquare(0, p.height / 2, 0);
-        player = new Player(seed, 1);
-        world = new World();
-        world.redSquares[0] = seed;
-
-        cam = {
-            x: player.pos.x - p.width * 0.32,
-            y: player.pos.y - p.height / 2,
-        };
-        showMsg("");
-    }
-
-    p.setup = () => {
-        const container = document.getElementById("incertidumbre");
-        // Canvas de tamaño FIJO: 600x600, siempre. No depende del tamaño
-        // de la ventana ni del zoom del navegador (no hay windowResized).
-        const c = p.createCanvas(400, 400);
-        c.parent(container);
-        buildHUD(container);
-        resetGame();
-        // showMsg("mantene click y arrastra — esquiva las compuertas que se cierran");
+  function rotatePoint(pt, rot, cx, cy) {
+    const cosA = Math.cos(rot), sinA = Math.sin(rot);
+    return {
+      x: cx + pt.x * cosA - pt.y * sinA,
+      y: cy + pt.x * sinA + pt.y * cosA
     };
+  }
 
-    // NOTA: se elimino windowResized() a proposito. Antes, al hacer zoom
-    // con la lupa del navegador, windowWidth/windowHeight cambiaban y
-    // resizeCanvas() reescalaba todo el juego (cuadrados, distancias,
-    // compuertas, etc). Ahora el canvas queda fijo en 600x600 pase lo
-    // que pase con el zoom o el tamaño de la ventana.
+  function squareEdges(sq) {
+    const h = sq.side / 2;
+    const local = [
+      { x: -h, y: -h }, { x: h, y: -h }, { x: h, y: h }, { x: -h, y: h }
+    ];
+    const corners = local.map(pt => rotatePoint(pt, sq.rot, sq.cx, sq.cy));
+    const edges = [];
+    for (let i = 0; i < 4; i++) {
+      edges.push({ a: corners[i], b: corners[(i + 1) % 4] });
+    }
+    return edges;
+  }
 
-    function showMsg(t) {
-        //msgEl.textContent = t;
-        //msgEl.style.opacity = t ? 1 : 0;
+  function midpoint(a, b) {
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  function closestPointOnSegment(pt, a, b) {
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const apx = pt.x - a.x, apy = pt.y - a.y;
+    const lenSq = abx * abx + aby * aby;
+    let t = lenSq === 0 ? 0 : (apx * abx + apy * aby) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const cx = a.x + abx * t, cy = a.y + aby * t;
+    const dx = pt.x - cx, dy = pt.y - cy;
+    return { point: { x: cx, y: cy }, dist: Math.sqrt(dx * dx + dy * dy) };
+  }
+
+  // ---------- jugador ----------
+  function makePlayer(squareIndex, edgeIndex) {
+    const edges = squareEdges(squares[squareIndex]);
+    const anchor = midpoint(edges[edgeIndex].a, edges[edgeIndex].b);
+    return {
+      squareIndex,
+      edgeIndex,
+      anchor: { x: anchor.x, y: anchor.y },
+      pos: { x: anchor.x, y: anchor.y },
+      r: size * 0.028,
+      state: 'alive', // 'alive' | 'dead'
+      deathTimer: 0
+    };
+  }
+
+  function clampToCanvas(x, y) {
+    return {
+      x: p.constrain(x, player.r, p.width - player.r),
+      y: p.constrain(y, player.r, p.height - player.r)
+    };
+  }
+
+  function tryTransfer() {
+    let bestDist = Infinity, best = null;
+    for (let si = 0; si < squares.length; si++) {
+      const edges = squareEdges(squares[si]);
+      for (let ei = 0; ei < edges.length; ei++) {
+        if (si === player.squareIndex && ei === player.edgeIndex) continue;
+        const { point, dist } = closestPointOnSegment(player.pos, edges[ei].a, edges[ei].b);
+        if (dist < bestDist) { bestDist = dist; best = { si, ei, point }; }
+      }
     }
 
-    function worldMouse() {
-        return { x: p.mouseX + cam.x, y: p.mouseY + cam.y };
+    const CONNECT_THRESH = size * CONNECT_FACTOR;
+    if (best && bestDist < CONNECT_THRESH) {
+      player.squareIndex = best.si;
+      player.edgeIndex = best.ei;
+      player.anchor = best.point;
+    } else {
+      // sigue en el mismo borde: el anclaje se desliza hasta el punto
+      // más cercano de ESE borde al lugar donde se está arrastrando
+      const edges = squareEdges(squares[player.squareIndex]);
+      const e = edges[player.edgeIndex];
+      const { point } = closestPointOnSegment(player.pos, e.a, e.b);
+      player.anchor = point;
+    }
+  }
+
+  function killPlayer() {
+    player.state = 'dead';
+    player.deathTimer = DEATH_MS;
+    dragging = false;
+    activePointer = null;
+  }
+
+  function revivePlayer() {
+    const edges = squareEdges(squares[player.squareIndex]);
+    const anchor = midpoint(edges[player.edgeIndex].a, edges[player.edgeIndex].b);
+    player.anchor = anchor;
+    player.pos = { x: anchor.x, y: anchor.y };
+    player.state = 'alive';
+  }
+
+  function updatePlayer() {
+    if (player.state === 'dead') {
+      player.deathTimer -= p.deltaTime;
+      if (player.deathTimer <= 0) revivePlayer();
+      return;
     }
 
-    // el mouse solo cuenta si el click ocurrio dentro de ESTE canvas
-    // (en modo instancia, mousePressed se dispara para toda la pagina,
-    // asi que hay que filtrar por las coordenadas locales del canvas).
-    function mouseInsideCanvas() {
-        return (
-            p.mouseX >= 0 &&
-            p.mouseX <= p.width &&
-            p.mouseY >= 0 &&
-            p.mouseY <= p.height
-        );
+    if (dragging) {
+      const target = clampToCanvas(pointerPos.x, pointerPos.y);
+      player.pos.x = p.lerp(player.pos.x, target.x, FOLLOW_EASE);
+      player.pos.y = p.lerp(player.pos.y, target.y, FOLLOW_EASE);
+      tryTransfer();
+    } else {
+      player.pos.x = p.lerp(player.pos.x, player.anchor.x, RETRACT_EASE);
+      player.pos.y = p.lerp(player.pos.y, player.anchor.y, RETRACT_EASE);
     }
 
-    p.mousePressed = () => {
-        if (!mouseInsideCanvas()) return;
+    checkGateCollision();
+  }
 
-        if (gameOver) {
-            resetGame();
-            return;
-        }
-        if (!started) {
-            started = true;
-            showMsg("");
-        }
-        dragging = true;
-    };
+  function drawPlayer() {
+    if (player.state === 'dead') return;
 
-    p.mouseReleased = () => {
-        dragging = false;
-    };
+    p.stroke(COLOR_RED);
+    p.strokeWeight(2);
+    p.line(player.anchor.x, player.anchor.y, player.pos.x, player.pos.y);
 
-    p.draw = () => {
-        p.background("#141414");
+    p.noStroke();
+    p.fill(COLOR_RED);
+    p.circle(player.pos.x, player.pos.y, player.r * 2);
+  }
 
-        if (gameOver) {
-            world.draw(cam.x, cam.y);
-            player.draw(cam.x, cam.y, false);
-            return;
-        }
+  // ---------- cuadrados (dibujo) ----------
+  function drawSquares() {
+    p.noFill();
+    p.stroke(COLOR_RED);
+    p.strokeWeight(3);
+    for (const sq of squares) {
+      const idleX = Math.sin(p.frameCount * IDLE_SPEED + sq.phase) * (IDLE_AMP * 0.6);
+      const idleY = Math.cos(p.frameCount * IDLE_SPEED * 0.9 + sq.phase) * (IDLE_AMP * 0.6);
+      p.push();
+      p.translate(sq.cx + idleX, sq.cy + idleY);
+      p.rotate(sq.rot);
+      p.rectMode(p.CENTER);
+      p.rect(0, 0, sq.side, sq.side);
+      p.pop();
+    }
+  }
 
-        const edges = world.allRedEdges();
-        player.update(worldMouse(), dragging, edges);
+  // ---------- compuertas (crema) ----------
+  function makeGate(cx, cy, length, width, rot) {
+    return { cx, cy, length, width, rot, phase: p.random(1000), state: 'idle', timer: 0, extend: 0 };
+  }
 
-        // la bolita choca contra el borde de la pantalla ACTUAL (antes de mover la camara):
-        // asi el estiramiento maximo real es hasta el limite visible, como una pared fija.
-        player.clampToScreen(cam);
+  function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
 
-        // camara suave siguiendo al jugador SOLO en X (avance horizontal).
-        // el eje Y de la camara NUNCA se mueve: la altura queda fija de una vez,
-        // asi el techo/piso de pantalla son paredes reales que no se corren
-        // aunque te quedes pegado contra el borde sosteniendo el arrastre.
-        const targetCamX = player.pos.x - p.width * 0.32;
-        cam.x += (targetCamX - cam.x) * 0.08;
+  function scheduleNextGateEvent() {
+    nextGateEventTimer = p.random(GATE_MIN_INTERVAL, GATE_MAX_INTERVAL);
+  }
 
-        // colision con las compuertas: solo matan si estan cerrando y te tocan
-        for (const g of world.gates) {
-            g.checkTrigger(player.pos.x, player.pos.y);
-            if (
-                g.checkCollision(player.pos.x, player.pos.y, player.r)
-            ) {
-                gameOver = true;
-                /*showMsg(
-                    "te atrapo la compuerta. click para reintentar",
-                );*/
-                break;
-            }
-        }
+  function updateGates() {
+    nextGateEventTimer -= p.deltaTime;
+    if (nextGateEventTimer <= 0) {
+      const idleGates = gates.filter(g => g.state === 'idle');
+      if (idleGates.length > 0) {
+        const g = p.random(idleGates);
+        g.state = 'closing';
+        g.timer = 0;
+      }
+      scheduleNextGateEvent();
+    }
 
-        world.update(cam.x);
+    for (const g of gates) {
+      if (g.state === 'idle') continue;
+      g.timer += p.deltaTime;
 
-        world.draw(cam.x, cam.y);
-        player.draw(cam.x, cam.y, dragging);
+      if (g.state === 'closing') {
+        const t = p.constrain(g.timer / GATE_CLOSE_MS, 0, 1);
+        g.extend = easeOutQuad(t);
+        if (t >= 1) { g.state = 'held'; g.timer = 0; }
+      } else if (g.state === 'held') {
+        g.extend = 1;
+        if (g.timer >= GATE_HOLD_MS) { g.state = 'reopening'; g.timer = 0; }
+      } else if (g.state === 'reopening') {
+        const t = p.constrain(g.timer / GATE_REOPEN_MS, 0, 1);
+        g.extend = 1 - easeOutQuad(t);
+        if (t >= 1) { g.state = 'idle'; g.timer = 0; g.extend = 0; }
+      }
+    }
+  }
 
-        maxDistReached = Math.max(maxDistReached, player.pos.x);
-        distTxtEl.textContent = Math.floor(maxDistReached / 10) + " m";
-    };
+  function drawGates() {
+    p.noStroke();
+    p.fill(COLOR_CREAM);
+    for (const g of gates) {
+      const idleX = Math.sin(p.frameCount * IDLE_SPEED + g.phase) * IDLE_AMP;
+      const idleY = Math.cos(p.frameCount * IDLE_SPEED * 0.8 + g.phase) * IDLE_AMP;
+      const currentLength = g.length * (1 + (GATE_EXTEND_FACTOR - 1) * g.extend);
+      p.push();
+      p.translate(g.cx + idleX, g.cy + idleY);
+      p.rotate(g.rot);
+      p.rectMode(p.CENTER);
+      p.rect(0, 0, currentLength, g.width);
+      p.pop();
+    }
+  }
+
+  function toLocal(pt, g) {
+    const dx = pt.x - g.cx, dy = pt.y - g.cy;
+    const cosA = Math.cos(-g.rot), sinA = Math.sin(-g.rot);
+    return { x: dx * cosA - dy * sinA, y: dx * sinA + dy * cosA };
+  }
+
+  function checkGateCollision() {
+    for (const g of gates) {
+      if (g.extend < GATE_DANGER_FROM) continue;
+      const currentLength = g.length * (1 + (GATE_EXTEND_FACTOR - 1) * g.extend);
+      const halfLen = currentLength / 2 + player.r;
+      const halfWid = g.width / 2 + player.r;
+      const local = toLocal(player.pos, g);
+      if (Math.abs(local.x) < halfLen && Math.abs(local.y) < halfWid) {
+        killPlayer();
+        return;
+      }
+    }
+  }
+
+  // ---------- ciclo principal ----------
+  p.draw = () => {
+    p.background(COLOR_BG);
+    updateGates();
+    drawGates();
+    drawSquares();
+    updatePlayer();
+    drawPlayer();
+  };
+
+  // ---------- interacción ----------
+  function mouseInsideCanvas() {
+    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+  }
+
+  p.mousePressed = () => {
+    if (!mouseInsideCanvas() || player.state !== 'alive' || activePointer !== null) return;
+    dragging = true;
+    activePointer = 'mouse';
+    pointerPos = { x: p.mouseX, y: p.mouseY };
+  };
+
+  p.mouseDragged = () => {
+    if (activePointer === 'mouse') {
+      pointerPos = { x: p.mouseX, y: p.mouseY };
+    }
+  };
+
+  p.mouseReleased = () => {
+    if (activePointer === 'mouse') {
+      dragging = false;
+      activePointer = null;
+    }
+  };
+
+  p.touchStarted = () => {
+    if (player.state === 'alive' && activePointer === null && p.touches.length > 0) {
+      const t = p.touches[0];
+      dragging = true;
+      activePointer = t.id;
+      pointerPos = { x: t.x, y: t.y };
+    }
+    return false;
+  };
+
+  p.touchMoved = () => {
+    for (const t of p.touches) {
+      if (t.id === activePointer) {
+        pointerPos = { x: t.x, y: t.y };
+      }
+    }
+    return false;
+  };
+
+  p.touchEnded = () => {
+    const stillActive = {};
+    for (const t of p.touches) stillActive[t.id] = true;
+    if (activePointer !== null && activePointer !== 'mouse' && !stillActive[activePointer]) {
+      dragging = false;
+      activePointer = null;
+    }
+    return false;
+  };
 };
 
-// Monta el sketch en el div#incertidumbre
-new p5(sketchIncertidumbre);
+new p5(sketchIncertidumbre, 'incertidumbre');
