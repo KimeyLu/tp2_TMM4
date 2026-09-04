@@ -6,17 +6,14 @@ const sketchColaboracion = (p) => {
   const MAX_STRETCH = 110;
   const SPRING_FACTOR = 0.12;
   const N_PARTICLES = 11;
-  const HOVER_TOLERANCE = 14; // px extra de "área de agarre" alrededor de cada figura
+  const HOVER_TOLERANCE = 14;
 
   let container;
   let particles = [];
   let edges = [];
-  let activeTouches = {}; // touchId (o 'mouse') -> particleId, mientras hay contacto activo
-  let hoveredId = null; // qué figura está bajo el cursor ahora mismo (solo mouse)
+  let activeTouches = {};
+  let hoveredId = null;
 
-  // ---------- LÍNEA DIVISORIA DIAGONAL ----------
-  // en vez de una barrera vertical, va en diagonal (estilo "identidad").
-  // se define con dos puntos; el resto se deriva de ahí.
   let lineTop, lineBottom, lineNormal, allowedSign;
 
   function setupLine() {
@@ -26,7 +23,6 @@ const sketchColaboracion = (p) => {
     const dy = lineBottom.y - lineTop.y;
     const len = Math.hypot(dx, dy) || 1;
     lineNormal = { x: -dy / len, y: dx / len };
-    // el lado "permitido" (donde arrancan las figuras) es el izquierdo
     allowedSign = Math.sign(rawSideDistance(10, p.height / 2)) || 1;
   }
 
@@ -34,12 +30,10 @@ const sketchColaboracion = (p) => {
     return (x - lineTop.x) * lineNormal.x + (y - lineTop.y) * lineNormal.y;
   }
 
-  // distancia con signo al lado permitido: positiva = todavía no cruzó, negativa = ya cruzó
   function sideDistance(x, y) {
     return rawSideDistance(x, y) * allowedSign;
   }
 
-  // x de la línea a una altura y dada (para ubicar a las figuras al generarlas)
   function lineXAt(y) {
     const t = p.height === 0 ? 0 : y / p.height;
     return lineTop.x + (lineBottom.x - lineTop.x) * t;
@@ -51,11 +45,6 @@ const sketchColaboracion = (p) => {
     setupLine();
     initParticles();
 
-    // el click derecho selecciona (toggle) en vez de abrir el menú contextual
-    // del navegador. Usamos el evento nativo 'contextmenu' en lugar de
-    // p.mouseButton === p.RIGHT porque ese chequeo es poco confiable entre
-    // navegadores/trackpads; 'contextmenu' es el evento que realmente
-    // representa "click derecho / click secundario" de forma consistente.
     if (container) {
       container.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -66,10 +55,11 @@ const sketchColaboracion = (p) => {
     }
   };
 
- /* p.windowResized = () => {
-    p.resizeCanvas(container.offsetWidth, container.offsetHeight);
+  p.windowResized = () => {
+    const { w, h } = window.getCanvasTargetSize('colaboracion', 400, 400);
+    p.resizeCanvas(w, h);
     setupLine();
-  }; */
+  };
 
   function initParticles() {
     particles = [];
@@ -94,8 +84,8 @@ const sketchColaboracion = (p) => {
       vy: p.random(-0.3, 0.3),
       rot: p.random(-0.3, 0.3),
       parent: id,
-      heldPress: false,   // contacto activo (touch o click izquierdo sostenido)
-      heldPersist: false, // selección persistente (click derecho, se mantiene hasta volver a tocar)
+      heldPress: false,
+      heldPersist: false,
       active: true,
       entering: entering
     };
@@ -124,9 +114,6 @@ const sketchColaboracion = (p) => {
     return count;
   }
 
-  // mueve una figura mientras se la sostiene (dedo o click izquierdo). Si su
-  // grupo todavía no llegó al umbral, no la deja cruzar la diagonal a mano,
-  // igual que el movimiento automático.
   function moveHeldParticle(pt, x, y) {
     let nx = p.constrain(x, pt.r, p.width - pt.r);
     let ny = p.constrain(y, pt.r, p.height - pt.r);
@@ -192,9 +179,6 @@ const sketchColaboracion = (p) => {
     );
   }
 
-  // Conecta TODAS las figuras que estén siendo seleccionadas al mismo tiempo
-  // (uno o varios dedos en simultáneo, o varias marcadas con click derecho).
-  // Ya no hace falta acercarlas ni hacer pinza: alcanza con tenerlas activas juntas.
   function checkConnections() {
     const held = particles.filter(pt => pt.active && isHeld(pt));
     for (let i = 0; i < held.length; i++) {
@@ -203,8 +187,6 @@ const sketchColaboracion = (p) => {
         if (find(a.id) !== find(b.id)) {
           union(a.id, b.id);
           edges.push([a.id, b.id]);
-          // una vez conectadas, se libera la selección persistente:
-          // ya cumplió su función, no hace falta seguir "marcándolas".
           a.heldPersist = false;
           b.heldPersist = false;
         }
@@ -235,7 +217,6 @@ const sketchColaboracion = (p) => {
 
         const sd = sideDistance(pt.x, pt.y);
         if (!empowered && sd < pt.r) {
-          // rebota contra la diagonal: la empuja de vuelta y refleja su velocidad
           const push = pt.r - sd;
           pt.x += lineNormal.x * allowedSign * push;
           pt.y += lineNormal.y * allowedSign * push;
@@ -244,7 +225,6 @@ const sketchColaboracion = (p) => {
           pt.vy -= 2 * vn * lineNormal.y;
         }
 
-        // una vez cruzada la línea, ya no puede retroceder
         if (sd < 0) {
           const vnAllowed = (pt.vx * lineNormal.x + pt.vy * lineNormal.y) * allowedSign;
           if (vnAllowed > 0) {
@@ -283,7 +263,6 @@ const sketchColaboracion = (p) => {
       if (d > MAX_STRETCH) {
         const excess = d - MAX_STRETCH;
         const dx = (b.x - a.x) / d, dy = (b.y - a.y) / d;
-        // una figura que ya cruzó la línea nunca es tironeada hacia atrás por el resorte
         const aCrossed = sideDistance(a.x, a.y) < 0;
         const bCrossed = sideDistance(b.x, b.y) < 0;
         if (!isHeld(a) && !aCrossed) { a.x += dx * excess * SPRING_FACTOR; a.y += dy * excess * SPRING_FACTOR; }
@@ -354,8 +333,6 @@ const sketchColaboracion = (p) => {
     }
   }
 
-  // isHovered: el cursor está encima (solo mouse) -> anillo fino, indica "podés interactuar"
-  // isHeld: está seleccionada ahora mismo -> anillo grueso color BG, bien visible
   function drawShape(pt, isHovered, isHeld) {
     p.push();
     p.translate(pt.x, pt.y);
@@ -395,9 +372,6 @@ const sketchColaboracion = (p) => {
     return id === null ? null : particles[id];
   }
 
-  // ---------- TOUCH: mantener el dedo sobre una figura la selecciona y la
-  // deja arrastrar; en cuanto hay 2+ seleccionadas al mismo tiempo, se
-  // conectan solas (no hace falta juntarlas para eso) ----------
   p.touchStarted = () => {
     for (const t of p.touches) {
       if (activeTouches[t.id] !== undefined) continue;
@@ -433,13 +407,9 @@ const sketchColaboracion = (p) => {
     return false;
   };
 
-  // ---------- MOUSE ----------
-  // click izquierdo sostenido: selección momentánea + arrastre, igual que un dedo.
-  // click derecho: selección persistente (toggle) — se maneja arriba, en el
-  // listener de 'contextmenu', no acá.
   p.mousePressed = (event) => {
     if (!mouseInsideCanvas()) return;
-    if (event && event.button === 2) return; // lo maneja el listener de contextmenu
+    if (event && event.button === 2) return;
 
     const pt = findParticleAt(p.mouseX, p.mouseY);
     if (!pt) return;

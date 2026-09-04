@@ -26,12 +26,13 @@ const sketchIdentidad = (p) => {
     setupLines();
     initParticles();
   };
-/*
+
   p.windowResized = () => {
-    p.resizeCanvas(container.offsetWidth, container.offsetHeight);
+    const { w, h } = window.getCanvasTargetSize('identidad', 400, 400);
+    p.resizeCanvas(w, h);
     setupLines();
   };
-*/
+
   function setupLines() {
     LINE_DRAW_LEN = p.width + p.height;
     PARTICLE_RANGE = (p.width + p.height) * 0.55;

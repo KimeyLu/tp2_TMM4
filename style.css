@@ -2,14 +2,14 @@ html, body {
     margin: 0;
     height: 100%;
     background: #141414;
-    overflow: hidden; /* que nunca haga scroll, sea cual sea la altura */
+    overflow: hidden;
 }
 
 .container {
     display: flex;
     box-sizing: border-box;
     height: 100vh;
-    gap: 1.6vh; /* separación entre grupos (filas), reducida para que entre todo */
+    gap: 1.6vh;
     padding: 1.2vh 2vw;
     flex-direction: column;
     justify-content: center;
@@ -39,10 +39,74 @@ html, body {
 }
 
 .item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.3vh; /* pegado a su propia pieza */
+  position: relative;
+  cursor: pointer;
+}
+
+.item.expanded {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
+  background: #141414;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.item.expanded .titulo {
+  display: none;
+}
+
+.container.has-expanded .item:not(.expanded) {
+  visibility: hidden;
+}
+
+/* Botón de cerrar, solo visible dentro del contenedor expandido */
+.close-btn {
+  display: none;
+  position: fixed;
+  top: 2.5vh;
+  right: 2.5vw;
+  z-index: 1001;
+  width: 5.5vh;
+  height: 5.5vh;
+  border-radius: 50%;
+  border: 2px solid #EFD583;
+  background: rgba(20, 20, 20, 0.65);
+  color: #EFD583;
+  font-size: 2.8vh;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.item.expanded .close-btn {
+  display: block;
+}
+
+/* Cuando el item está expandido, el canvas pasa a ocupar toda la pantalla.
+   incertidumbre queda afuera de esta lista a propósito (ver regla debajo). */
+.item.expanded #memoria canvas,
+.item.expanded #herencia canvas,
+.item.expanded #caducidad canvas,
+.item.expanded #colaboracion canvas,
+.item.expanded #identidad canvas,
+.item.expanded #empatia canvas,
+.item.expanded #expectativa canvas,
+.item.expanded #ansiedad canvas {
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+/* incertidumbre mantiene su canvas a resolución fija (400x400) a propósito
+   (para no romper el balance del juego procedural), así que acá solo lo
+   agrandamos manteniendo el cuadrado, sin estirarlo ni deformarlo */
+.item.expanded #incertidumbre canvas {
+  width: auto !important;
+  height: auto !important;
+  max-width: 100vmin !important;
+  max-height: 100vmin !important;
 }
 
 .titulo {
@@ -56,8 +120,6 @@ html, body {
     text-align: center;
 }
 
-/* borde fino en todos los canvas para que las piezas de fondo oscuro
-   no se pierdan contra el fondo negro de la página */
 .item canvas {
     border: 1px solid rgba(239, 213, 131, 0.3);
     box-sizing: border-box;
@@ -65,45 +127,45 @@ html, body {
 
 #memoria canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #herencia canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #caducidad canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #colaboracion canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #identidad canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #empatia canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #incertidumbre canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #expectativa canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
 
 #ansiedad canvas {
     width: auto !important;
-    height: 27vh !important; /* mantiene la proporción */
+    height: 27vh !important;
 }
