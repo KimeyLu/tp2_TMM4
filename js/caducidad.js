@@ -4,7 +4,7 @@ const Caducidad = (p) => {
   const shapeTypes = ['triangle', 'square', 'circle'];
   const shapeColors = ['#F0D583', '#121212'];
  
-  const shapeSize = 30;
+  const shapeSize = 24;
  
   let pathStart, pathEnd;
   const fadeStart = 0.333;
