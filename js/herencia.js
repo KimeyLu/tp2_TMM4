@@ -8,7 +8,17 @@ const Herencia = (p) => {
  
   const TYPES = ['circle', 'square', 'triangle'];
   const COLORS = ['#F0D583', '#121212'];
-  const SHAPE_SIZE = 24;
+
+  // tamaño base de las formas (a 400x400). El tamaño real (SHAPE_SIZE) se
+  // recalcula con computeSizeScale() para que se vea más grande en fullscreen.
+  const BASE_SHAPE_SIZE = 24;
+  let SHAPE_SIZE;
+  let SIZE_SCALE = 1;
+
+  function computeSizeScale() {
+    const ratio = Math.min(p.width, p.height) / 400;
+    return ratio <= 1 ? ratio : ratio * 1.25;
+  }
 
   // posiciones donde quedan las formas al soltarlas en C. Se calculan como
   // proporción del canvas (antes eran píxeles fijos calculados a mano para
@@ -24,10 +34,37 @@ const Herencia = (p) => {
     SNAP_A = { x: p.width * 0.375, y: p.height * 0.345 };
     SNAP_B = { x: p.width * 0.6, y: p.height * 0.345 };
   }
+
+  // reubica las formas padre existentes según el layout ACTUAL: si todavía
+  // no fueron soltadas en C, al centro de su rectángulo; si ya estaban
+  // colocadas, al punto de snap correspondiente. Esto es lo que evita que
+  // se vean "corridas" fuera de su cuadrado al cambiar el tamaño del canvas.
+  function repositionParents() {
+    if (parentA) {
+      if (parentA.placed) {
+        parentA.x = SNAP_A.x;
+        parentA.y = SNAP_A.y;
+      } else {
+        parentA.x = rectA.x + rectA.w / 2;
+        parentA.y = rectA.y + rectA.h / 2;
+      }
+    }
+    if (parentB) {
+      if (parentB.placed) {
+        parentB.x = SNAP_B.x;
+        parentB.y = SNAP_B.y;
+      } else {
+        parentB.x = rectB.x + rectB.w / 2;
+        parentB.y = rectB.y + rectB.h / 2;
+      }
+    }
+  }
  
   p.setup = function() {
     p.createCanvas(400, 400);
     p.rectMode(p.CORNER);
+    SIZE_SCALE = computeSizeScale();
+    SHAPE_SIZE = BASE_SHAPE_SIZE * SIZE_SCALE;
     computeLayout();
  
     parentA = spawnShape('A');
@@ -37,7 +74,26 @@ const Herencia = (p) => {
   p.windowResized = function() {
     const { w, h } = window.getCanvasTargetSize('herencia', 400, 400);
     p.resizeCanvas(w, h);
+
+    const oldScale = SIZE_SCALE;
     computeLayout();
+    SIZE_SCALE = computeSizeScale();
+    SHAPE_SIZE = BASE_SHAPE_SIZE * SIZE_SCALE;
+
+    const ratio = SIZE_SCALE / oldScale;
+    if (parentA) parentA.size *= ratio;
+    if (parentB) parentB.size *= ratio;
+    for (const m of merging) {
+      m.a.size *= ratio;
+      m.b.size *= ratio;
+      m.baseSize *= ratio;
+    }
+    for (const c of children) {
+      c.baseSize *= ratio;
+      c.size *= ratio;
+    }
+
+    repositionParents();
   }
  
   p.draw = function() {

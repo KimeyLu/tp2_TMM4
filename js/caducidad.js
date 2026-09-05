@@ -1,387 +1,300 @@
 const Caducidad = (p) => {
+  // ---------- variables necesarias ----------
+  let shape = null;
+  const shapeTypes = ['triangle', 'square', 'circle'];
+  const shapeColors = ['#F0D583', '#121212'];
 
-  let triX, triY;
-  let TRI_X_INICIAL, TRI_Y_INICIAL;
-  let arrastrando = false;
+  // tamaño base de la forma (a 400x400). El tamaño real (shapeSize) se
+  // recalcula con computeSizeScale() para que se vea más grande en fullscreen.
+  const BASE_SHAPE_SIZE = 24;
+  const BASE_MAX_SHAKE = 6;
+  let shapeSize;
+  let maxShake;
+  let SIZE_SCALE = 1;
 
-  let cuadrados = [];
+  let pathStart, pathEnd;
+  const fadeStart = 0.333;
+  const fadeEnd = 0.75;
 
-  // definición proporcional de los 4 cuadrados anidados (fracción del
-  // ancho/alto del canvas), para poder recalcularlos si el canvas cambia
-  // de tamaño (por ejemplo, al abrir el signo en pantalla completa)
-  const CUADRADOS_DEF = [
-    { l: 0.25,  t: 0.25,  r: 0.75,  b: 0.75  },
-    { l: 0.225, t: 0.225, r: 0.775, b: 0.775 },
-    { l: 0.20,  t: 0.20,  r: 0.80,  b: 0.80  },
-    { l: 0.175, t: 0.175, r: 0.825, b: 0.825 }
-  ];
+  let isDragging = false;
+  let movingForward = false; // si el ultimo movimiento de arrastre fue hacia adelante
 
-  const TRI_ABAJO = 30;
-  const TRI_ANCHO = 20;
+  const easeAtStart = 0.15; // que tan liviana es al principio del recorrido
+  const easeAtEnd = 0.02;   // que tan pesada es cerca del final del recorrido
 
-  let bordeTocado = null;
-  let tiempoInicioToque = 0;
-  const TIEMPO_LIMITE = 3000;
-  const TIEMPO_REGENERACION = 10000;
+  const canvasRotation = -43; // grados de rotacion visual del canvas (solo estetico)
 
-  let triHealth = 100;
-  const TRI_HEALTH_MAX = 100;
+  const spawnFromX = -50;    // desde donde "viene" la forma nueva antes de llegar al inicio
+  const spawnEase = 0.08;    // velocidad de la animacion de entrada
 
-  const ANGULO_ROTACION = 45; // grados
+  let particles = [];             // particulas que caen de la forma mientras se arrastra hacia adelante
+  const particleGravity = 0.15;
+  const particleLife = 40;        // frames que dura cada particula
 
-  function pantallaARotado(px, py) {
-    const cx = p.width / 2, cy = p.height / 2;
-    const ang = p.radians(-ANGULO_ROTACION);
-    const dx = px - cx;
-    const dy = py - cy;
-    const rx = dx * p.cos(ang) - dy * p.sin(ang);
-    const ry = dx * p.sin(ang) + dy * p.cos(ang);
-    return { x: rx + cx, y: ry + cy };
+  function computeSizeScale() {
+    const ratio = Math.min(p.width, p.height) / 400;
+    return ratio <= 1 ? ratio : ratio * 1.25;
   }
 
-  let particulas = [];
-  let contadorSpawn = 0;
-  const INTERVALO_SPAWN = 6;
-
-  const FLOTE_AMP_X = 3;
-  const FLOTE_AMP_Y = 5;
-  const FLOTE_VEL_X = 0.0018;
-  const FLOTE_VEL_Y = 0.0024;
-
-  function calcularFlote() {
-    if (arrastrando) {
-      return { dx: 0, dy: 0 };
-    }
-    return {
-      dx: p.sin(p.millis() * FLOTE_VEL_X) * FLOTE_AMP_X,
-      dy: p.cos(p.millis() * FLOTE_VEL_Y) * FLOTE_AMP_Y
-    };
+  function computeSizes() {
+    SIZE_SCALE = computeSizeScale();
+    shapeSize = BASE_SHAPE_SIZE * SIZE_SCALE;
+    maxShake = BASE_MAX_SHAKE * SIZE_SCALE;
   }
 
-  class Particula {
-    constructor(x, y) {
-      this.x = x + p.random(-5, 5);
-      this.y = y + p.random(-5, 5);
-      this.tam = p.random(4, 8);
-      this.vy = p.random(1, 2.5);
-      this.vx = p.random(-0.5, 0.5);
-      this.alpha = 255;
-      this.desvanecimiento = p.random(3, 6);
-    }
-    actualizar() {
-      this.y += this.vy;
-      this.x += this.vx;
-      this.alpha -= this.desvanecimiento;
-    }
-    estaViva() {
-      return this.alpha > 0;
-    }
-    dibujar() {
-      p.push();
-        p.noStroke();
-        p.fill(0, 0, 0, this.alpha);
-        p.triangle(
-          this.x, this.y,
-          this.x - this.tam / 2, this.y + this.tam,
-          this.x + this.tam / 2, this.y + this.tam
-        );
-      p.pop();
-    }
-  }
-
-  function emitirParticulas(x, y, cantidad = 5) {
-    for (let i = 0; i < cantidad; i++) {
-      particulas.push(new Particula(x, y));
-    }
-  }
-
-  function actualizarYDibujarParticulas() {
-    for (let i = particulas.length - 1; i >= 0; i--) {
-      particulas[i].actualizar();
-      particulas[i].dibujar();
-      if (!particulas[i].estaViva()) {
-        particulas.splice(i, 1);
-      }
-    }
-  }
-
-  class Cuadrado {
-    constructor(izq, arriba, der, abajo) {
-      this.izq = izq;
-      this.arriba = arriba;
-      this.der = der;
-      this.abajo = abajo;
-      this.rotoArriba = false;
-      this.rotoIzq = false;
-      this.rotoDer = false;
-      this.rotoAbajo = false;
-      this.alphaArriba = 255;
-      this.alphaIzq = 255;
-      this.alphaDer = 255;
-      this.alphaAbajo = 255;
-      this.tiempoRoturaArriba = null;
-      this.tiempoRoturaIzq = null;
-      this.tiempoRoturaDer = null;
-      this.tiempoRoturaAbajo = null;
-    }
-    dibujar() {
-      p.push();
-        if (!this.rotoArriba) {
-          p.stroke(239, 212, 131, this.alphaArriba);
-          p.line(this.izq, this.arriba, this.der, this.arriba);
-        }
-        if (!this.rotoIzq) {
-          p.stroke(239, 212, 131, this.alphaIzq);
-          p.line(this.izq, this.arriba, this.izq, this.abajo);
-        }
-        if (!this.rotoDer) {
-          p.stroke(239, 212, 131, this.alphaDer);
-          p.line(this.der, this.arriba, this.der, this.abajo);
-        }
-        if (!this.rotoAbajo) {
-          p.stroke(239, 212, 131, this.alphaAbajo);
-          p.line(this.izq, this.abajo, this.der, this.abajo);
-        }
-      p.pop();
-    }
-    resetAlpha(lado) {
-      if (lado === 'arriba') this.alphaArriba = 255;
-      if (lado === 'izq')    this.alphaIzq = 255;
-      if (lado === 'der')    this.alphaDer = 255;
-      if (lado === 'abajo')  this.alphaAbajo = 255;
-    }
-    setAlpha(lado, valor) {
-      if (lado === 'arriba') this.alphaArriba = valor;
-      if (lado === 'izq')    this.alphaIzq = valor;
-      if (lado === 'der')    this.alphaDer = valor;
-      if (lado === 'abajo')  this.alphaAbajo = valor;
-    }
-    romper(lado) {
-      if (lado === 'arriba') { this.rotoArriba = true; this.tiempoRoturaArriba = p.millis(); }
-      if (lado === 'izq')    { this.rotoIzq = true;    this.tiempoRoturaIzq = p.millis(); }
-      if (lado === 'der')    { this.rotoDer = true;    this.tiempoRoturaDer = p.millis(); }
-      if (lado === 'abajo')  { this.rotoAbajo = true;  this.tiempoRoturaAbajo = p.millis(); }
-    }
-    regenerar(lado) {
-      if (lado === 'arriba') { this.rotoArriba = false; this.tiempoRoturaArriba = null; this.alphaArriba = 255; }
-      if (lado === 'izq')    { this.rotoIzq = false;    this.tiempoRoturaIzq = null;    this.alphaIzq = 255; }
-      if (lado === 'der')    { this.rotoDer = false;    this.tiempoRoturaDer = null;    this.alphaDer = 255; }
-      if (lado === 'abajo')  { this.rotoAbajo = false;  this.tiempoRoturaAbajo = null;  this.alphaAbajo = 255; }
-    }
-    actualizarRegeneracion() {
-      const ahora = p.millis();
-      if (this.rotoArriba && ahora - this.tiempoRoturaArriba >= TIEMPO_REGENERACION) this.regenerar('arriba');
-      if (this.rotoIzq    && ahora - this.tiempoRoturaIzq    >= TIEMPO_REGENERACION) this.regenerar('izq');
-      if (this.rotoDer    && ahora - this.tiempoRoturaDer    >= TIEMPO_REGENERACION) this.regenerar('der');
-      if (this.rotoAbajo  && ahora - this.tiempoRoturaAbajo  >= TIEMPO_REGENERACION) this.regenerar('abajo');
-    }
-  }
-
-  function computeCuadrados() {
-    if (cuadrados.length === 0) {
-      for (const d of CUADRADOS_DEF) {
-        cuadrados.push(new Cuadrado(
-          p.width * d.l, p.height * d.t, p.width * d.r, p.height * d.b
-        ));
-      }
-    } else {
-      cuadrados.forEach((c, i) => {
-        const d = CUADRADOS_DEF[i];
-        c.izq = p.width * d.l;
-        c.arriba = p.height * d.t;
-        c.der = p.width * d.r;
-        c.abajo = p.height * d.b;
-      });
-    }
-  }
-
-  function computeTriangleInit() {
-    TRI_X_INICIAL = p.width * 0.5;
-    TRI_Y_INICIAL = p.height * 0.375;
-  }
-
-  p.setup = function () {
+  p.setup = function() {
     p.createCanvas(400, 400);
-    computeTriangleInit();
-    triX = TRI_X_INICIAL;
-    triY = TRI_Y_INICIAL;
-    computeCuadrados();
-  };
+    computeSizes();
+    pathStart = 0;
+    pathEnd = p.width;
+    shape = createShape(pathStart);
+  }
 
-  p.windowResized = function () {
-    const oldW = p.width, oldH = p.height;
+  p.windowResized = function() {
+    const oldW = p.width;
     const { w, h } = window.getCanvasTargetSize('caducidad', 400, 400);
     p.resizeCanvas(w, h);
 
     const scaleX = p.width / oldW;
-    const scaleY = p.height / oldH;
+    computeSizes();
+    pathEnd = p.width;
 
-    computeCuadrados();
-    computeTriangleInit();
-    triX *= scaleX;
-    triY *= scaleY;
-  };
+    if (shape) {
+      shape.x *= scaleX;
+      shape.maxX *= scaleX;
+      shape.spawnTargetX *= scaleX;
+      shape.y = p.height / 2;
+    }
+  }
 
-  p.draw = function () {
-    p.background(151, 5, 16);
+  p.draw = function() {
+    // el fondo se dibuja antes de rotar, para que siempre cubra todo el canvas
+    p.background('#970510');
+
+    p.translate(p.width / 2, p.height / 2);
+    p.rotate(p.radians(canvasRotation));
+    p.translate(-p.width / 2, -p.height / 2);
+
+    //patron de fondo
+    p.stroke('#F0D583');
     p.strokeWeight(4);
-    p.strokeCap(p.SQUARE);
+    p.line(p.width/3.4, p.height / 4.7, p.width/3.4, p.height / 2.5);
+    p.strokeWeight(3);
+    p.line(p.width/2, p.height / 4.7, p.width/2, p.height / 2.5);
+    p.strokeWeight(2);
+    p.line(p.width/1.4, p.height / 4.7, p.width/1.4, p.height / 2.5);
 
-    p.push();
-      p.translate(p.width / 2, p.height / 2);
-      p.rotate(p.radians(ANGULO_ROTACION));
-      p.translate(-p.width / 2, -p.height / 2);
+    // Línea de fondo
+    p.stroke('#F0D583');
+    p.strokeWeight(2);
+    p.line(-100, p.height / 2, p.width + 100, p.height / 2);
 
-      for (const c of cuadrados) {
-        c.actualizarRegeneracion();
-        c.dibujar();
+    // Animacion de entrada, opacidad, particulas y dibujo
+    UpdateSpawnAnimation();
+    UpdateOpacity();
+    EmitParticles();
+    UpdateAndDrawParticles();
+    DrawShape();
+
+    // Verificar si la forma desapareció
+    CheckAndRespawn();
+  }
+
+  // ---------- creación ----------
+  function createShape(xPos) {
+    return {
+      type: p.random(shapeTypes),
+      color: p.random(shapeColors),
+      x: spawnFromX,       // arranca lejos, a la izquierda de la linea
+      spawnTargetX: xPos,  // adonde tiene que llegar antes de poder ser interactuada
+      isSpawning: true,
+      y: p.height / 2,
+      maxX: xPos,
+      opacity: 255
+    };
+  }
+
+  // ---------- animacion de entrada ----------
+  function UpdateSpawnAnimation() {
+    if (!shape || !shape.isSpawning) return;
+
+    shape.x = p.lerp(shape.x, shape.spawnTargetX, spawnEase);
+
+    if (Math.abs(shape.spawnTargetX - shape.x) < 0.5) {
+      shape.x = shape.spawnTargetX;
+      shape.isSpawning = false;
+    }
+  }
+
+  // ---------- emitir particulas mientras se arrastra hacia adelante ----------
+  function EmitParticles() {
+    if (!shape || !isDragging || !movingForward) return;
+
+    const progress = p.constrain((shape.x - pathStart) / (pathEnd - pathStart), 0, 1);
+    const spawnProbability = p.lerp(0.15, 1, progress); // mas avance = mas particulas
+    const particleSize = p.lerp(3 * SIZE_SCALE, 7 * SIZE_SCALE, progress); // tambien un poco mas grandes
+
+    if (p.random() < spawnProbability) {
+      particles.push({
+        type: shape.type,
+        color: shape.color,
+        x: shape.x + p.random(-shapeSize / 4, shapeSize / 4),
+        y: shape.y + shapeSize / 4,
+        vx: p.random(-0.4, 0.4),
+        vy: p.random(0.5, 1.5),
+        size: particleSize,
+        life: particleLife,
+        maxLife: particleLife
+      });
+    }
+  }
+
+  // ---------- actualizar y dibujar particulas ----------
+  function UpdateAndDrawParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const particle = particles[i];
+
+      particle.vy += particleGravity;
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      particle.life--;
+
+      if (particle.life <= 0) {
+        particles.splice(i, 1);
+        continue;
       }
 
-      const alphaTriangulo = p.map(triHealth, 0, TRI_HEALTH_MAX, 0, 255);
-      const flote = calcularFlote();
-      p.push();
-        p.stroke(18, 18, 18, alphaTriangulo);
-        p.fill(18, 18, 18, alphaTriangulo);
+      const alpha = p.map(particle.life, 0, particle.maxLife, 0, 255);
+      const c = p.color(particle.color);
+      p.noStroke();
+      p.fill(p.red(c), p.green(c), p.blue(c), alpha);
+
+      if (particle.type === 'circle') {
+        p.circle(particle.x, particle.y, particle.size);
+      } else if (particle.type === 'square') {
+        p.rectMode(p.CENTER);
+        p.square(particle.x, particle.y, particle.size);
+      } else if (particle.type === 'triangle') {
+        const half = particle.size / 2;
         p.triangle(
-          triX + flote.dx, triY + flote.dy,
-          triX - TRI_ANCHO + flote.dx, triY + TRI_ABAJO + flote.dy,
-          triX + TRI_ANCHO + flote.dx, triY + TRI_ABAJO + flote.dy
+          particle.x, particle.y - half,
+          particle.x - half, particle.y + half,
+          particle.x + half, particle.y + half
         );
-      p.pop();
-
-      if (arrastrando) {
-        verificarToqueYDanio();
-
-        const centroX = triX;
-        const centroY = (triY + (triY + TRI_ABAJO) + (triY + TRI_ABAJO)) / 3;
-        p.push();
-          p.stroke(18, 18, 18);
-          p.strokeWeight(2);
-          p.line(centroX, centroY, p.width / 2, -p.height/2);
-        p.pop();
       }
-
-      actualizarYDibujarParticulas();
-
-      p.push();
-        p.fill(0, 0, 0, 0);
-        p.stroke(30, 30, 30);
-        p.strokeWeight(4);
-        p.rect(70, -60, 260, 10);
-        p.rect(90, -80, 220, 10);
-
-        
-        p.rect(80, p.height+50, 240, 10);
-        p.rect(90, p.height+40, 220, 30);
-      p.pop();
-    p.pop();
-  };
-
-  function calcularLimites() {
-    let minX = -Infinity, cuadIzq = null;
-    let maxX = Infinity,  cuadDer = null;
-    let minY = -Infinity, cuadArriba = null;
-    let maxY = Infinity,  cuadAbajo = null;
-
-    for (const c of cuadrados) {
-      if (!c.rotoIzq) {
-        const val = c.izq + TRI_ANCHO;
-        if (val > minX) { minX = val; cuadIzq = c; }
-      }
-      if (!c.rotoDer) {
-        const val = c.der - TRI_ANCHO;
-        if (val < maxX) { maxX = val; cuadDer = c; }
-      }
-      if (!c.rotoArriba) {
-        const val = c.arriba;
-        if (val > minY) { minY = val; cuadArriba = c; }
-      }
-      if (!c.rotoAbajo) {
-        const val = c.abajo - TRI_ABAJO;
-        if (val < maxY) { maxY = val; cuadAbajo = c; }
-      }
-    }
-
-    return { minX, maxX, minY, maxY, cuadIzq, cuadDer, cuadArriba, cuadAbajo };
-  }
-
-  function verificarToqueYDanio() {
-    const lim = calcularLimites();
-
-    let objetivo = null;
-    if (triY <= lim.minY && lim.cuadArriba) objetivo = { cuadrado: lim.cuadArriba, lado: 'arriba' };
-    else if (triY >= lim.maxY && lim.cuadAbajo) objetivo = { cuadrado: lim.cuadAbajo, lado: 'abajo' };
-    else if (triX <= lim.minX && lim.cuadIzq) objetivo = { cuadrado: lim.cuadIzq, lado: 'izq' };
-    else if (triX >= lim.maxX && lim.cuadDer) objetivo = { cuadrado: lim.cuadDer, lado: 'der' };
-
-    if (objetivo === null) {
-      if (bordeTocado !== null) bordeTocado.cuadrado.resetAlpha(bordeTocado.lado);
-      bordeTocado = null;
-      triHealth = TRI_HEALTH_MAX;
-      return;
-    }
-
-    const esElMismo = bordeTocado
-      && bordeTocado.cuadrado === objetivo.cuadrado
-      && bordeTocado.lado === objetivo.lado;
-
-    if (!esElMismo) {
-      if (bordeTocado !== null) bordeTocado.cuadrado.resetAlpha(bordeTocado.lado);
-      bordeTocado = objetivo;
-      tiempoInicioToque = p.millis();
-    }
-
-    const transcurrido = p.millis() - tiempoInicioToque;
-    const progreso = p.constrain(transcurrido / TIEMPO_LIMITE, 0, 1);
-
-    bordeTocado.cuadrado.setAlpha(bordeTocado.lado, p.map(progreso, 0, 1, 255, 0));
-    triHealth = p.map(progreso, 0, 1, TRI_HEALTH_MAX, 0);
-
-    contadorSpawn++;
-    if (contadorSpawn >= INTERVALO_SPAWN) {
-      emitirParticulas(triX, triY + TRI_ABAJO / 2, 5);
-      contadorSpawn = 0;
-    }
-
-    if (progreso >= 1) {
-      romperBordeYReiniciarTriangulo();
     }
   }
 
-  function romperBordeYReiniciarTriangulo() {
-    bordeTocado.cuadrado.romper(bordeTocado.lado);
+  // ---------- dibujar forma ----------
+  function DrawShape() {
+    if (!shape || shape.opacity <= 0) return;
 
-    triX = TRI_X_INICIAL;
-    triY = TRI_Y_INICIAL;
-    triHealth = TRI_HEALTH_MAX;
-    bordeTocado = null;
-    arrastrando = false;
+    const c = p.color(shape.color);
+    p.strokeWeight(3 * SIZE_SCALE);
+    p.stroke(c);
+    p.fill(p.red(c), p.green(c), p.blue(c), shape.opacity);
+
+    // temblor: solo mientras se arrastra hacia adelante, cada vez mas fuerte segun el progreso
+    let shakeX = 0, shakeY = 0;
+    if (isDragging && movingForward) {
+      const progress = p.constrain((shape.x - pathStart) / (pathEnd - pathStart), 0, 1);
+      const shakeAmount = p.lerp(0, maxShake, progress);
+      shakeX = p.random(-shakeAmount, shakeAmount);
+      shakeY = p.random(-shakeAmount, shakeAmount);
+    }
+
+    const dx = shape.x + shakeX;
+    const dy = shape.y + shakeY;
+
+    if (shape.type === 'circle') {
+      p.circle(dx, dy, shapeSize);
+    } else if (shape.type === 'square') {
+      p.rectMode(p.CENTER);
+      p.square(dx, dy, shapeSize);
+    } else if (shape.type === 'triangle') {
+      const half = shapeSize / 2;
+      p.triangle(
+        dx, dy - half,
+        dx - half, dy + half,
+        dx + half, dy + half
+      );
+    }
   }
 
-  p.mousePressed = function () {
-    const m = pantallaARotado(p.mouseX, p.mouseY);
-    if (p.dist(m.x, m.y, triX, triY + 20) < 30) {
-      arrastrando = true;
-    }
-  };
+  // ---------- opacidad según recorrido ----------
+  function UpdateOpacity() {
+    if (!shape) return;
 
-  p.mouseDragged = function () {
-    if (!arrastrando) return;
-    const m = pantallaARotado(p.mouseX, p.mouseY);
-    const lim = calcularLimites();
-    triX = p.constrain(m.x, lim.minX, lim.maxX);
-    triY = p.constrain(m.y - 20, lim.minY, lim.maxY);
-  };
+    const progress = p.constrain((shape.maxX - pathStart) / (pathEnd - pathStart), 0, 1);
 
-  p.mouseReleased = function () {
-    arrastrando = false;
-    if (bordeTocado !== null) {
-      bordeTocado.cuadrado.resetAlpha(bordeTocado.lado);
-      bordeTocado = null;
+    if (progress <= fadeStart) {
+      shape.opacity = 255;
+    } else if (progress >= fadeEnd) {
+      shape.opacity = 0;
+    } else {
+      shape.opacity = p.map(progress, fadeStart, fadeEnd, 255, 0);
     }
-    triHealth = TRI_HEALTH_MAX;
-  };
+  }
+
+  // ---------- verificar y regenerar ----------
+  function CheckAndRespawn() {
+    if (!shape || shape.opacity <= 0) {
+      // Generar nueva forma al inicio
+      shape = createShape(pathStart);
+      isDragging = false; // Resetear el estado de arrastre
+    }
+  }
+
+  // ---------- traducir el mouse al espacio sin rotar ----------
+  function getLogicalMouse() {
+    const cx = p.width / 2;
+    const cy = p.height / 2;
+    const theta = p.radians(canvasRotation);
+
+    const dx = p.mouseX - cx;
+    const dy = p.mouseY - cy;
+
+    // rotacion inversa (-theta) alrededor del centro del canvas
+    const x = dx * Math.cos(theta) + dy * Math.sin(theta) + cx;
+    const y = -dx * Math.sin(theta) + dy * Math.cos(theta) + cy;
+
+    return { x, y };
+  }
+
+  // ---------- interacción con el mouse ----------
+  p.mousePressed = function() {
+    const mouse = getLogicalMouse();
+    if (shape && !shape.isSpawning && p.dist(mouse.x, mouse.y, shape.x, shape.y) < shapeSize / 2 + 4) {
+      isDragging = true;
+    }
+  }
+
+  p.mouseDragged = function() {
+    if (isDragging && shape) {
+      const mouse = getLogicalMouse();
+      const targetX = p.constrain(mouse.x, pathStart, pathEnd);
+
+      if (targetX > shape.x) {
+        // hacia adelante: cuanto mas avanzo en el recorrido, mas "pesada" se pone
+        movingForward = true;
+        const progress = p.constrain((shape.x - pathStart) / (pathEnd - pathStart), 0, 1);
+        const forwardEase = p.lerp(easeAtStart, easeAtEnd, progress);
+        shape.x = p.lerp(shape.x, targetX, forwardEase);
+      } else {
+        // hacia atras: sin resistencia, se mueve normal, y sin temblor
+        movingForward = false;
+        shape.x = targetX;
+      }
+
+      shape.maxX = Math.max(shape.maxX, shape.x);
+    }
+  }
+
+  p.mouseReleased = function() {
+    isDragging = false;
+    movingForward = false;
+  }
 };
 
-// Instanciación: 'caducidad' es el id del div donde va este canvas
+// Instanciación
 new p5(Caducidad, 'caducidad');

@@ -1,5 +1,5 @@
 /* ============================================================
-   INCERTIDUMBRE 
+   INCERTIDUMBRE
    ============================================================ */
 
 const sketchIncertidumbre = (p) => {
@@ -17,7 +17,7 @@ const sketchIncertidumbre = (p) => {
   const GATE_CLOSE_MS = 140;
   const GATE_HOLD_MS = 260;
   const GATE_REOPEN_MS = 320;
-  const GATE_EXTEND_FACTOR = 2.6; // cuánto se alarga la barra al cerrarse
+  const GATE_CLOSE_OVERSHOOT = 2.05; // qué tanto más allá del centro exacto llega la punta al cerrarse (asegura que realmente atrape)
   const GATE_MIN_INTERVAL = 1800;
   const GATE_MAX_INTERVAL = 3600;
   const GATE_DANGER_FROM = 0.55; // a partir de qué tan "cerrada" (0-1) ya puede romper al círculo
@@ -46,17 +46,25 @@ const sketchIncertidumbre = (p) => {
 
   function buildScene(keepPlayer) {
     size = Math.min(p.width, p.height);
+    const centerX = p.width / 2;
+    const centerY = p.height / 2;
 
-    // dos cuadrados en la diagonal "/" (arriba-derecha y abajo-izquierda)
+    // dos cuadrados en la diagonal "/" (arriba-derecha y abajo-izquierda),
+    // a un margen simétrico (0.25/0.75) respecto al centro.
     squares = [
-      makeSquare(p.width * 0.74, p.height * 0.26, size * 0.30, p.radians(45)),
-      makeSquare(p.width * 0.26, p.height * 0.74, size * 0.30, p.radians(45))
+      makeSquare(p.width * 0.75, p.height * 0.25, size * 0.30, p.radians(45)),
+      makeSquare(p.width * 0.25, p.height * 0.75, size * 0.30, p.radians(45))
     ];
 
-    // dos barras en la diagonal "\" (arriba-izquierda y abajo-derecha)
+    // dos barras en la diagonal "\" (arriba-izquierda y abajo-derecha), mismo
+    // margen simétrico. Cada una apunta exactamente hacia el centro de la
+    // pantalla (así queda bien alineada sea cual sea el aspecto del canvas,
+    // cuadrado o pantalla completa) y su longitud "cerrada" llega justo hasta
+    // el centro: entre las dos, cuando les toca cerrarse, sí pueden atrapar
+    // al jugador en el camino entre los cuadrados.
     gates = [
-      makeGate(p.width * 0.20, p.height * 0.20, size * 0.34, size * 0.11, p.radians(45)),
-      makeGate(p.width * 0.80, p.height * 0.80, size * 0.34, size * 0.11, p.radians(45))
+      makeGate(p.width * 0.25, p.height * 0.25, size * 0.34, size * 0.11, centerX, centerY),
+      makeGate(p.width * 0.75, p.height * 0.75, size * 0.34, size * 0.11, centerX, centerY)
     ];
 
     if (!keepPlayer || !player) {
@@ -152,8 +160,6 @@ const sketchIncertidumbre = (p) => {
       player.edgeIndex = best.ei;
       player.anchor = best.point;
     } else {
-      // sigue en el mismo borde: el anclaje se desliza hasta el punto
-      // más cercano de ESE borde al lugar donde se está arrastrando
       const edges = squareEdges(squares[player.squareIndex]);
       const e = edges[player.edgeIndex];
       const { point } = closestPointOnSegment(player.pos, e.a, e.b);
@@ -226,8 +232,22 @@ const sketchIncertidumbre = (p) => {
   }
 
   // ---------- compuertas (crema) ----------
-  function makeGate(cx, cy, length, width, rot) {
-    return { cx, cy, length, width, rot, phase: p.random(1000), state: 'idle', timer: 0, extend: 0 };
+  // baseLength: tamaño "idle" (en reposo). closedLength: longitud cuando está
+  // totalmente cerrada, calculada para que su punta llegue justo al centro
+  // de la pantalla (más un pequeño extra, GATE_CLOSE_OVERSHOOT).
+  function makeGate(cx, cy, baseLength, width, targetX, targetY) {
+    const rot = Math.atan2(targetY - cy, targetX - cx);
+    const distToTarget = Math.hypot(targetX - cx, targetY - cy);
+    const closedLength = distToTarget * 2 * GATE_CLOSE_OVERSHOOT / 2; // = distToTarget * GATE_CLOSE_OVERSHOOT
+    return {
+      cx, cy, rot, width, baseLength, closedLength,
+      phase: p.random(1000),
+      state: 'idle', timer: 0, extend: 0
+    };
+  }
+
+  function currentGateLength(g) {
+    return p.lerp(g.baseLength, g.closedLength, g.extend);
   }
 
   function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
@@ -273,12 +293,12 @@ const sketchIncertidumbre = (p) => {
     for (const g of gates) {
       const idleX = Math.sin(p.frameCount * IDLE_SPEED + g.phase) * IDLE_AMP;
       const idleY = Math.cos(p.frameCount * IDLE_SPEED * 0.8 + g.phase) * IDLE_AMP;
-      const currentLength = g.length * (1 + (GATE_EXTEND_FACTOR - 1) * g.extend);
+      const len = currentGateLength(g);
       p.push();
       p.translate(g.cx + idleX, g.cy + idleY);
       p.rotate(g.rot);
       p.rectMode(p.CENTER);
-      p.rect(0, 0, currentLength, g.width);
+      p.rect(0, 0, len, g.width);
       p.pop();
     }
   }
@@ -292,8 +312,8 @@ const sketchIncertidumbre = (p) => {
   function checkGateCollision() {
     for (const g of gates) {
       if (g.extend < GATE_DANGER_FROM) continue;
-      const currentLength = g.length * (1 + (GATE_EXTEND_FACTOR - 1) * g.extend);
-      const halfLen = currentLength / 2 + player.r;
+      const len = currentGateLength(g);
+      const halfLen = len / 2 + player.r;
       const halfWid = g.width / 2 + player.r;
       const local = toLocal(player.pos, g);
       if (Math.abs(local.x) < halfLen && Math.abs(local.y) < halfWid) {

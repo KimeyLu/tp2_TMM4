@@ -4,7 +4,7 @@ const Memoria = (p) => {
     let lineY;
     let shapes = [];       // formas que recorren la linea
     let memories = [];     // clones guardados al costado de la linea
-    let leavingItems = [];  // clones en proceso de desaparecer (animacion FIFO)
+    let fadingOut = [];     // clones desvaneciendose al reiniciar la memoria
  
     const COLORS = ['#F0D583', '#121212'];
     const TYPES = ['triangle', 'rect', 'circle'];
@@ -12,16 +12,49 @@ const Memoria = (p) => {
     const SHAPE_SPEED = 1.5; // velocidad fija para todas las formas
     let WRAP_LEN; // distancia total del ciclo (igual para todas, evita desfasajes)
     const ROTATION_ANGLE = p.radians(-43); // rotacion del canvas, ajustable
+
+    // ---------- escala de tamaño (más grande al expandirse a pantalla completa) ----------
+    const BASE_SHAPE_SIZE = 24;
+    const BASE_CURSOR_SIZE = 30;
+    const BASE_MEMORY_START_X = 120;
+    const BASE_MEMORY_COL_SPACING = 80;
+    const BASE_MEMORY_ROW_SPACING = 22;
+    let SIZE_SCALE = 1;
+
+    function computeSizeScale() {
+        const ratio = Math.min(p.width, p.height) / 400;
+        return ratio <= 1 ? ratio : ratio * 1.25;
+    }
  
     // cursor
-    let cursorSize = 30;
-    const CURSOR_BASE_SIZE = 30;
+    let cursorSize;
+    let CURSOR_BASE_SIZE;
     let cursorColor = '#F0D583';
     let hitTimer = 0;
     const HIT_DURATION = 18; // frames que dura la animacion de "achique"
  
+    // memoria: 3 columnas, 4 formas por columna
+    const MEMORY_COLS = 3;
+    const MEMORY_ROWS = 4;
+    const MEMORY_CAPACITY = MEMORY_COLS * MEMORY_ROWS;
+    let MEMORY_START_X;
+    let MEMORY_START_Y; // depende de p.height, se asigna en setup
+    let MEMORY_COL_SPACING;
+    let MEMORY_ROW_SPACING;
+    const SLIDE_EASE = 0.2; // suaviza la aparicion de cada clon en su lugar
+    const RESET_FADE_DURATION = 30; // frames que tardan en desvanecerse al reiniciar
+
+    function computeSizes() {
+        SIZE_SCALE = computeSizeScale();
+        CURSOR_BASE_SIZE = BASE_CURSOR_SIZE * SIZE_SCALE;
+        MEMORY_START_X = BASE_MEMORY_START_X * SIZE_SCALE;
+        MEMORY_COL_SPACING = BASE_MEMORY_COL_SPACING * SIZE_SCALE;
+        MEMORY_ROW_SPACING = BASE_MEMORY_ROW_SPACING * SIZE_SCALE;
+    }
+ 
     p.setup = function() {
         p.createCanvas(400, 400);
+        computeSizes();
         lineY = p.height / 2;
         WRAP_LEN = p.width + 180; // buffer fijo, mayor al tamanio maximo de una forma
         MEMORY_START_Y = p.height / 4;
@@ -32,11 +65,26 @@ const Memoria = (p) => {
     }
 
     p.windowResized = function() {
+        const oldScale = SIZE_SCALE;
+        const oldWrap = WRAP_LEN;
+
         const { w, h } = window.getCanvasTargetSize('memoria', 400, 400);
         p.resizeCanvas(w, h);
+
+        computeSizes();
         lineY = p.height / 2;
         WRAP_LEN = p.width + 180;
         MEMORY_START_Y = p.height / 4;
+
+        const sizeRatio = SIZE_SCALE / oldScale;
+        const wrapRatio = WRAP_LEN / oldWrap;
+
+        for (const s of shapes) {
+            s.size *= sizeRatio;
+            s.offset *= wrapRatio; // mantiene la separación relativa entre formas
+        }
+        for (const m of memories) m.size *= sizeRatio;
+        for (const f of fadingOut) f.size *= sizeRatio;
     }
  
     p.draw = function() {
@@ -50,7 +98,7 @@ const Memoria = (p) => {
  
         p.stroke('#F0D583');
         p.strokeWeight(2);
-        p.line(-100, lineY, p.width+100, lineY);
+        p.line(-100, lineY, p.width + 100, lineY);
  
         DrawShapes();
         ShapeMemory();
@@ -79,7 +127,7 @@ const Memoria = (p) => {
             offset: offset, // posicion de referencia dentro del ciclo, fija
             lastCycle: 0,
             clicked: false, // evita generar mas de un clon por ciclo
-            size: p.random(24, 24),
+            size: BASE_SHAPE_SIZE * SIZE_SCALE,
             type: p.random(TYPES),
             color: p.random(COLORS)
         };
@@ -110,7 +158,7 @@ const Memoria = (p) => {
         for (let s of shapes) {
             let cyclePos = (s.offset + travel) % WRAP_LEN;
             let cycleCount = Math.floor((s.offset + travel) / WRAP_LEN);
-            s.x = cyclePos - 100; //posicion en que inician las formas, aparecen, principio
+            s.x = cyclePos - 100; // posicion en que inician las formas, aparecen, principio
  
             // al arrancar un nuevo ciclo, se reasignan tipo y color
             // y se habilita de nuevo la posibilidad de generar un clon
@@ -149,17 +197,6 @@ const Memoria = (p) => {
         p.pop();
     }
  
-    const MEMORY_COLS = 3;
-    const MEMORY_ROWS = 4;
-    const MEMORY_CAPACITY = MEMORY_COLS * MEMORY_ROWS;
-    const MEMORY_START_X = 120;
-    let MEMORY_START_Y; // depende de p.height, se asigna en setup
-    const MEMORY_COL_SPACING = 80; // distancia horizontal entre columnas
-    const MEMORY_ROW_SPACING = 22; // distancia vertical entre formas de una misma columna
-    const SLIDE_EASE = 0.2;      // velocidad del reacomodo de los que se quedan
-    const LEAVE_DURATION = 30;   // frames que dura la animacion de salida
-    const LEAVE_RISE = 30;       // cuanto sube (px) el que se va
- 
     function slotPos(i) {
         let col = Math.floor(i / MEMORY_ROWS);
         let row = i % MEMORY_ROWS;
@@ -167,7 +204,8 @@ const Memoria = (p) => {
     }
  
     function ShapeMemory() {
-        // clones activos: 3 columnas, 4 formas por columna, con reacomodo suave
+        // clones guardados: 3 columnas, 4 formas por columna, con
+        // reacomodo suave hacia su lugar (misma logica grafica del sketch)
         for (let i = 0; i < memories.length; i++) {
             let m = memories[i];
             let target = slotPos(i);
@@ -176,16 +214,15 @@ const Memoria = (p) => {
             drawShapeAt(m.dispX, m.dispY, m.size, m.type, m.color);
         }
  
-        // clones saliendo (First In): suben y se desvanecen antes de desaparecer
-        for (let i = leavingItems.length - 1; i >= 0; i--) {
-            let m = leavingItems[i];
-            m.leaveTimer--;
-            let progress = 1 - (m.leaveTimer / LEAVE_DURATION); // 0 -> 1
-            let y = m.startY - progress * LEAVE_RISE;
-            let alpha = 255 * (1 - progress);
-            drawShapeAt(m.startX, y, m.size, m.type, m.color, alpha);
-            if (m.leaveTimer <= 0) {
-                leavingItems.splice(i, 1);
+        // clones del reset anterior: se quedan quietos en su lugar
+        // y se van desvaneciendo hasta desaparecer
+        for (let i = fadingOut.length - 1; i >= 0; i--) {
+            let f = fadingOut[i];
+            f.fadeTimer--;
+            let alpha = 255 * (f.fadeTimer / RESET_FADE_DURATION);
+            drawShapeAt(f.x, f.y, f.size, f.type, f.color, alpha);
+            if (f.fadeTimer <= 0) {
+                fadingOut.splice(i, 1);
             }
         }
     }
@@ -203,14 +240,20 @@ const Memoria = (p) => {
                 hitTimer = HIT_DURATION;
                 s.clicked = true; // ya generó su clon, no puede generar otro hasta el proximo ciclo
  
-                // FIFO: si ya esta llena la memoria, el mas viejo (First In)
-                // pasa a animarse hacia arriba y desvanecerse en vez de borrarse de golpe
+                // reset: si ya esta llena la memoria, los clones actuales se
+                // desvanecen en su lugar en vez de borrarse de golpe
                 if (memories.length >= MEMORY_CAPACITY) {
-                    let removed = memories.shift();
-                    removed.leaveTimer = LEAVE_DURATION;
-                    removed.startX = removed.dispX; // se congela donde estaba, sin saltos
-                    removed.startY = removed.dispY;
-                    leavingItems.push(removed);
+                    for (let old of memories) {
+                        fadingOut.push({
+                            size: old.size,
+                            type: old.type,
+                            color: old.color,
+                            x: old.dispX,
+                            y: old.dispY,
+                            fadeTimer: RESET_FADE_DURATION
+                        });
+                    }
+                    memories = [];
                 }
  
                 let idx = memories.length;
@@ -219,9 +262,10 @@ const Memoria = (p) => {
                     size: s.size * 0.5,
                     type: s.type,
                     color: s.color,
-                    dispX: pos.x, // nace ya en su posicion final
+                    dispX: pos.x, // nace ya en su posicion final, sin animacion de entrada
                     dispY: pos.y
                 });
+ 
                 break; // solo la primera forma tocada
             }
         }
