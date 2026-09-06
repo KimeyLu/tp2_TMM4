@@ -437,6 +437,7 @@ function applySpringConstraints() {
   }
 
   p.touchStarted = () => {
+    let grabbedSomething = false;
     for (const t of p.touches) {
       if (activeTouches[t.id] !== undefined) continue;
       const pt = findParticleAt(t.x, t.y);
@@ -444,19 +445,24 @@ function applySpringConstraints() {
         pt.entering = false; // Permite selección temprana
         pt.heldPress = true;
         activeTouches[t.id] = pt.id;
+        grabbedSomething = true;
       }
     }
-    return false;
+    // Solo bloqueamos el gesto nativo (scroll) si efectivamente agarramos
+    // una figura; si el toque cayó en un espacio vacío del canvas, dejamos
+    // que la página siga scrolleando normalmente.
+    return !grabbedSomething;
   };
 
   p.touchMoved = () => {
+    const isDraggingAny = Object.keys(activeTouches).length > 0;
     for (const t of p.touches) {
       const pid = activeTouches[t.id];
       if (pid !== undefined) {
         moveHeldParticle(particles[pid], t.x, t.y);
       }
     }
-    return false;
+    return !isDraggingAny;
   };
 
   p.touchEnded = () => {
@@ -469,7 +475,7 @@ function applySpringConstraints() {
         delete activeTouches[id];
       }
     }
-    return false;
+    return true;
   };
 
   p.mousePressed = (event) => {

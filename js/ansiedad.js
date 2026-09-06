@@ -221,22 +221,23 @@ function drawSceneGeometry() {
   };
 
   p.touchStarted = () => {
-    if (!mouseInsideCanvas()) return false;
+    if (!mouseInsideCanvas()) return true; // fuera del canvas: dejar scrollear
     const mouse = getLogicalMouse();
     if (p.dist(mouse.x, mouse.y, circleX, circleY) < circleR * 2.5) {
       isDragging = true;
+      return false; // agarró el círculo: bloquear el gesto para arrastrar
     }
-    return false;
+    return true; // tocó el canvas pero no el círculo: permitir scroll
   };
 
   p.touchMoved = () => {
     // El movimiento se procesa dentro del p.draw() con updatePosition()
-    return false;
+    return !isDragging; // solo bloquear el scroll mientras se arrastra
   };
 
   p.touchEnded = () => {
     isDragging = false;
-    return false;
+    return true;
   };
 };
 

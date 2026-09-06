@@ -364,8 +364,9 @@ const sketchIncertidumbre = (p) => {
       dragging = true;
       activePointer = t.id;
       pointerPos = { x: t.x, y: t.y };
+      return false; // arrancó el arrastre: bloquear el gesto nativo
     }
-    return false;
+    return true; // nada que arrastrar: dejar pasar el scroll
   };
 
   p.touchMoved = () => {
@@ -374,7 +375,7 @@ const sketchIncertidumbre = (p) => {
         pointerPos = { x: t.x, y: t.y };
       }
     }
-    return false;
+    return !dragging;
   };
 
   p.touchEnded = () => {
@@ -384,7 +385,7 @@ const sketchIncertidumbre = (p) => {
       dragging = false;
       activePointer = null;
     }
-    return false;
+    return true;
   };
 };
 

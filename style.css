@@ -9,6 +9,7 @@ html, body {
     display: flex;
     box-sizing: border-box;
     height: 100vh;
+    height: 100dvh; /* alto real visible en mobile, sin la barra de direcciones */
     gap: 1.6vh;
     padding: 1.2vh 2vw;
     flex-direction: column;
@@ -43,11 +44,24 @@ html, body {
   cursor: pointer;
 }
 
+/* Deja que el navegador maneje el scroll vertical nativo sobre los canvases
+   de la grilla, aunque el sketch tenga handlers de touch. Esto es lo que
+   evita que cada canvas "trabe" el scroll de la página en celular. */
+.item:not(.expanded) canvas {
+  touch-action: pan-y;
+}
+
+/* En pantalla completa sí queremos control total del gesto (drag, etc). */
+.item.expanded canvas {
+  touch-action: none;
+}
+
 .item.expanded {
   position: fixed;
   inset: 0;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   z-index: 1000;
   background: #141414;
   display: flex;
@@ -118,6 +132,7 @@ html, body {
 
   .container {
     height: 100vh;       /* altura fija, no "auto" */
+    height: 100dvh;
     overflow-y: auto;    /* ahora sí recorta y permite scrollear */
     -webkit-overflow-scrolling: touch; /* scroll más fluido en iOS */
     justify-content: start;
