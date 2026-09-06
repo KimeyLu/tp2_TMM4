@@ -76,7 +76,7 @@ const sketchIdentidad = (p) => {
     p.push();
     p.noStroke();
     p.fill(bgColor);
-    p.rect(0, 0, p.width, p.height/5); //no se programar
+    p.rect(0, 0, p.width, p.height/3); //mamá soy multimedia
     p.pop();
     ShapesWithIdentityMovement();
     
