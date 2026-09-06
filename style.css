@@ -110,3 +110,60 @@ html, body {
     height: 27vh !important; /* Fuerza un cuadrado perfecto */
     object-fit: cover; /* Evita que el contenido interno se deforme */
 }
+
+@media (max-width: 768px) {
+  html, body {
+    overflow: hidden; /* el scroll lo maneja .container, no el body */
+  }
+
+  .container {
+    height: 100vh;       /* altura fija, no "auto" */
+    overflow-y: auto;    /* ahora sí recorta y permite scrollear */
+    -webkit-overflow-scrolling: touch; /* scroll más fluido en iOS */
+    justify-content: start;
+    align-items: start;
+  }
+
+  .sub_1,
+  .sub_2,
+  .sub_3 {
+    flex-direction: column;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 3vh;
+  }
+
+  .item {
+    margin-bottom: 5%;
+    width: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .titulo {
+    margin: 0;
+    font-family: sans-serif;
+    font-size: 2.5vh;
+    font-weight: 600;
+    letter-spacing: 0.1vw;
+    text-transform: uppercase;
+    color: #EFD583;
+    text-align: center;
+  }
+
+  .item:not(.expanded) canvas {
+    width: 90vw !important;
+    height: 90vw !important;
+    max-width: 320px;
+    max-height: 320px;
+  }
+
+  .item.expanded canvas {
+    align-items: center;
+    justify-content: center;
+    width: auto !important;
+    height: auto !important;
+  
+}
+}
