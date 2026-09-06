@@ -24,15 +24,15 @@ const Caducidad = (p) => {
 
   const canvasRotation = -43; // grados de rotacion visual del canvas (solo estetico)
 
-  const spawnFromX = -50;    // desde donde "viene" la forma nueva antes de llegar al inicio
-  const spawnEase = 0.08;    // velocidad de la animacion de entrada
+  let spawnFromX;             // desde donde "viene" la forma nueva antes de llegar al inicio (se calcula en computeSizes)
+  const spawnEase = 0.08;     // velocidad de la animacion de entrada
 
   let particles = [];             // particulas que caen de la forma mientras se arrastra hacia adelante
-  const particleGravity = 0.15;
-  const particleLife = 40;        // frames que dura cada particula
+  const particleGravity = 0.15;   // valor base; se escala por SIZE_SCALE al aplicarse
+  const particleLife = 40;        // frames que dura cada particula (tiempo, no tamaño: no se escala)
 
   function computeSizeScale() {
-    const ratio = Math.min(p.width, p.height) / 400;
+    const ratio = Math.min(p.width, p.height) / 400; // 400 = canvas de referencia del diseño original
     return ratio <= 1 ? ratio : ratio * 1.25;
   }
 
@@ -44,6 +44,7 @@ const Caducidad = (p) => {
     SIZE_SCALE = computeSizeScale();
     shapeSize = BASE_SHAPE_SIZE * SIZE_SCALE;
     maxShake = BASE_MAX_SHAKE * SIZE_SCALE;
+    spawnFromX = -p.width / 8; // antes: -50 (fijo). Ahora es proporcional al ancho actual.
   }
 
   p.setup = function() {
@@ -81,17 +82,17 @@ const Caducidad = (p) => {
 
     //patron de fondo
     p.stroke('#F0D583');
-    p.strokeWeight(4);
+    p.strokeWeight(4 * SIZE_SCALE);
     p.line(p.width/3.4, p.height / 4.7, p.width/3.4, p.height / 2.5);
-    p.strokeWeight(3);
+    p.strokeWeight(3 * SIZE_SCALE);
     p.line(p.width/2, p.height / 4.7, p.width/2, p.height / 2.5);
-    p.strokeWeight(2);
+    p.strokeWeight(2 * SIZE_SCALE);
     p.line(p.width/1.4, p.height / 4.7, p.width/1.4, p.height / 2.5);
 
     // Línea de fondo
     p.stroke('#F0D583');
-    p.strokeWeight(2);
-    p.line(-100, p.height / 2, p.width + 100, p.height / 2);
+    p.strokeWeight(2 * SIZE_SCALE);
+    p.line(-p.width / 4, p.height / 2, p.width + p.width / 4, p.height / 2);
 
     // Animacion de entrada, opacidad, particulas y dibujo
     UpdateSpawnAnimation();
@@ -144,8 +145,8 @@ const Caducidad = (p) => {
         color: shape.color,
         x: shape.x + p.random(-shapeSize / 4, shapeSize / 4),
         y: shape.y + shapeSize / 4,
-        vx: p.random(-0.4, 0.4),
-        vy: p.random(0.5, 1.5),
+        vx: p.random(-0.4, 0.4) * SIZE_SCALE,
+        vy: p.random(0.5, 1.5) * SIZE_SCALE,
         size: particleSize,
         life: particleLife,
         maxLife: particleLife
@@ -158,7 +159,7 @@ const Caducidad = (p) => {
     for (let i = particles.length - 1; i >= 0; i--) {
       const particle = particles[i];
 
-      particle.vy += particleGravity;
+      particle.vy += particleGravity * SIZE_SCALE;
       particle.x += particle.vx;
       particle.y += particle.vy;
       particle.life--;
@@ -269,7 +270,7 @@ const Caducidad = (p) => {
   p.mousePressed = function() {
     if (!mouseInsideCanvas()) return;
     const mouse = getLogicalMouse();
-    if (shape && !shape.isSpawning && p.dist(mouse.x, mouse.y, shape.x, shape.y) < shapeSize / 2 + 4) {
+    if (shape && !shape.isSpawning && p.dist(mouse.x, mouse.y, shape.x, shape.y) < shapeSize / 2 + 4 * SIZE_SCALE) {
       isDragging = true;
     }
   }
