@@ -10,17 +10,34 @@
 
 const sketchExpectativa = (p) => {
     // ---------------------------------------------------------
-    // CONFIG — all tunable values live here
+    // CONFIG — valores que se recalculan según el tamaño del canvas.
+    // BASE_CONFIG guarda los valores de referencia (a 400x400);
+    // applyScale() los reescala para que en fullscreen se vea todo
+    // más grande, manteniendo las proporciones entre sí.
     // ---------------------------------------------------------
-    const CONFIG = {
+    const BASE_CONFIG = {
         canvasSize: 400,
-
         squareSize: 150,
-        outlineSpacing: 11, // px between nested charge-outlines
+        outlineSpacing: 11,
         strokeWeightThin: 1.6,
-
         nodeRadius: 8,
-        nodeOffset: 44, // distance the node floats outside the square edge
+        nodeOffset: 44,
+        triangleLength: 200,
+        triangleHalfWidth: 80,
+        dashSpeed: 1250,
+        pullBackMax: 40,
+        spawnMargin: 3
+    };
+
+    const CONFIG = {
+        canvasSize: BASE_CONFIG.canvasSize,
+
+        squareSize: BASE_CONFIG.squareSize,
+        outlineSpacing: BASE_CONFIG.outlineSpacing,
+        strokeWeightThin: BASE_CONFIG.strokeWeightThin,
+
+        nodeRadius: BASE_CONFIG.nodeRadius,
+        nodeOffset: BASE_CONFIG.nodeOffset,
         easeAnchor: 0.16, // how fast the edge-anchor slides
         easeNode: 0.22, // how fast the visible node eases toward its target
 
@@ -28,12 +45,12 @@ const sketchExpectativa = (p) => {
         pauseBetweenAttacks: 0.8, // seconds — rest between attacks
         fillFlashTime: 0.16, // seconds — square fill fade-in speed
 
-        triangleLength: 200,
-        triangleHalfWidth: 80,
-        dashSpeed: 1250, // px / sec top speed
+        triangleLength: BASE_CONFIG.triangleLength,
+        triangleHalfWidth: BASE_CONFIG.triangleHalfWidth,
+        dashSpeed: BASE_CONFIG.dashSpeed, // px / sec top speed
         dashAccelTime: 0.22, // seconds to reach top speed
-        pullBackMax: 40, // px the triangle winds up before launching
-        spawnMargin: 3, // px outside the canvas the enemy spawns at
+        pullBackMax: BASE_CONFIG.pullBackMax, // px the triangle winds up before launching
+        spawnMargin: BASE_CONFIG.spawnMargin, // px outside the canvas the enemy spawns at
 
         colors: {
             bg: "#141414",
@@ -48,6 +65,24 @@ const sketchExpectativa = (p) => {
             textDim: "#3c3c3c",
         },
     };
+
+    function computeSizeScale() {
+        const ratio = Math.min(p.width, p.height) / BASE_CONFIG.canvasSize;
+        return ratio <= 1 ? ratio : ratio * 1.25;
+    }
+
+    function applyScale(scale) {
+        CONFIG.squareSize = BASE_CONFIG.squareSize * scale;
+        CONFIG.outlineSpacing = BASE_CONFIG.outlineSpacing * scale;
+        CONFIG.strokeWeightThin = BASE_CONFIG.strokeWeightThin * scale;
+        CONFIG.nodeRadius = BASE_CONFIG.nodeRadius * scale;
+        CONFIG.nodeOffset = BASE_CONFIG.nodeOffset * scale;
+        CONFIG.triangleLength = BASE_CONFIG.triangleLength * scale;
+        CONFIG.triangleHalfWidth = BASE_CONFIG.triangleHalfWidth * scale;
+        CONFIG.dashSpeed = BASE_CONFIG.dashSpeed * scale;
+        CONFIG.pullBackMax = BASE_CONFIG.pullBackMax * scale;
+        CONFIG.spawnMargin = BASE_CONFIG.spawnMargin * scale;
+    }
 
     // ---------------------------------------------------------
     // EASING HELPERS
@@ -527,11 +562,11 @@ const sketchExpectativa = (p) => {
     // GAME — top level state machine
     // ---------------------------------------------------------
     class Game {
-        constructor() {
-            this.w = CONFIG.canvasSize;
-            this.h = CONFIG.canvasSize;
-            this.cx = this.w / 2;
-            this.cy = this.h / 2;
+        constructor(w, h) {
+            this.w = w;
+            this.h = h;
+            this.cx = w / 2;
+            this.cy = h / 2;
             this.reset();
         }
 
@@ -580,9 +615,17 @@ const sketchExpectativa = (p) => {
 
     p.setup = () => {
         const container = document.getElementById("expectativa");
-        const c = p.createCanvas(CONFIG.canvasSize, CONFIG.canvasSize);
+        const c = p.createCanvas(BASE_CONFIG.canvasSize, BASE_CONFIG.canvasSize);
         c.parent(container);
-        game = new Game();
+        applyScale(computeSizeScale());
+        game = new Game(p.width, p.height);
+    };
+
+    p.windowResized = () => {
+        const { w, h } = window.getCanvasTargetSize('expectativa', BASE_CONFIG.canvasSize, BASE_CONFIG.canvasSize);
+        p.resizeCanvas(w, h);
+        applyScale(computeSizeScale());
+        game = new Game(p.width, p.height);
     };
 
     // el mouse solo cuenta si esta dentro de ESTE canvas (en modo instancia

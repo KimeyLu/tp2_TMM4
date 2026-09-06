@@ -3,73 +3,82 @@ const sketchColaboracion = (p) => {
   const BLACK = '#141414';
   const RED = '#970511';
   const GROUP_THRESHOLD = 3;
-  const MAX_STRETCH = 110;
-  const SPRING_FACTOR = 0.12;
+  
+  // Constantes base (calculadas para una resolución de 400x400)
+  const BASE_CANVAS = 400;
+  const BASE_MAX_STRETCH = 110;
+  const BASE_HOVER_TOLERANCE = 14;
   const N_PARTICLES = 11;
-  const HOVER_TOLERANCE = 14; // px extra de "área de agarre" alrededor de cada figura
 
+  let currentScale = 1;
   let container;
   let particles = [];
   let edges = [];
-  let activeTouches = {}; // touchId (o 'mouse') -> particleId, mientras hay contacto activo
-  let hoveredId = null; // qué figura está bajo el cursor ahora mismo (solo mouse)
+  let activeTouches = {};
+  let hoveredId = null;
 
-  // ---------- LÍNEA DIVISORIA DIAGONAL ----------
-  // en vez de una barrera vertical, va en diagonal (estilo "identidad").
-  // se define con dos puntos; el resto se deriva de ahí.
-  let lineTop, lineBottom, lineNormal, allowedSign;
+  let lineTop, lineBottom, lineNormal;
+
+  function updateScale() {
+    currentScale = Math.min(p.width, p.height) / BASE_CANVAS;
+  }
 
   function setupLine() {
-    lineTop = { x: p.width * 0.34, y: 0 };
-    lineBottom = { x: p.width * 0.74, y: p.height };
-    const dx = lineBottom.x - lineTop.x;
-    const dy = lineBottom.y - lineTop.y;
+    lineBottom = { x: 0, y: p.height };
+    lineTop = { x: p.width, y: 0 };
+    
+    const dx = lineTop.x - lineBottom.x;
+    const dy = lineTop.y - lineBottom.y;
     const len = Math.hypot(dx, dy) || 1;
-    lineNormal = { x: -dy / len, y: dx / len };
-    // el lado "permitido" (donde arrancan las figuras) es el izquierdo
-    allowedSign = Math.sign(rawSideDistance(10, p.height / 2)) || 1;
+    
+    lineNormal = { x: p.height / len, y: p.width / len };
   }
 
-  function rawSideDistance(x, y) {
-    return (x - lineTop.x) * lineNormal.x + (y - lineTop.y) * lineNormal.y;
-  }
-
-  // distancia con signo al lado permitido: positiva = todavía no cruzó, negativa = ya cruzó
   function sideDistance(x, y) {
-    return rawSideDistance(x, y) * allowedSign;
-  }
-
-  // x de la línea a una altura y dada (para ubicar a las figuras al generarlas)
-  function lineXAt(y) {
-    const t = p.height === 0 ? 0 : y / p.height;
-    return lineTop.x + (lineBottom.x - lineTop.x) * t;
+    return (x - lineBottom.x) * lineNormal.x + (y - lineBottom.y) * lineNormal.y;
   }
 
   p.setup = () => {
     container = document.getElementById('colaboracion');
     p.createCanvas(400, 400);
+    updateScale();
     setupLine();
     initParticles();
 
-    // el click derecho selecciona (toggle) en vez de abrir el menú contextual
-    // del navegador. Usamos el evento nativo 'contextmenu' en lugar de
-    // p.mouseButton === p.RIGHT porque ese chequeo es poco confiable entre
-    // navegadores/trackpads; 'contextmenu' es el evento que realmente
-    // representa "click derecho / click secundario" de forma consistente.
     if (container) {
       container.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         if (!mouseInsideCanvas()) return;
         const pt = findParticleAt(p.mouseX, p.mouseY);
-        if (pt) pt.heldPersist = !pt.heldPersist;
+        if (pt) {
+          pt.entering = false; // Permite selección temprana
+          pt.heldPersist = !pt.heldPersist;
+        }
       });
     }
   };
 
- /* p.windowResized = () => {
-    p.resizeCanvas(container.offsetWidth, container.offsetHeight);
+  p.windowResized = () => {
+    const w = container ? container.clientWidth : 400;
+    const h = container ? container.clientHeight : 400;
+    
+    const oldW = p.width;
+    const oldH = p.height;
+    
+    p.resizeCanvas(w, h);
+    updateScale();
     setupLine();
-  }; */
+
+    // Mantener la proporción de las partículas al cambiar el tamaño de la ventana
+    const scaleX = w / oldW;
+    const scaleY = h / oldH;
+    
+    for (let pt of particles) {
+      pt.r = pt.rBase * currentScale;
+      pt.x *= scaleX;
+      pt.y *= scaleY;
+    }
+  };
 
   function initParticles() {
     particles = [];
@@ -83,19 +92,29 @@ const sketchColaboracion = (p) => {
   }
 
   function makeParticle(id, shape, entering) {
-    const r = p.random(24, 32);
-    const y = p.random(r, p.height - r);
-    const maxX = Math.max(90, lineXAt(y) - 70);
+    const rBase = p.random(20, 28); // Tamaño base un poco más grande
+    const r = rBase * currentScale;
+    let px, py;
+    
+    if (entering) {
+      px = -r - p.random(0, 100);
+      py = p.random(r, p.height - r);
+    } else {
+      do {
+        px = p.random(r, p.width - r);
+        py = p.random(r, p.height - r);
+      } while (sideDistance(px, py) > -r - 10);
+    }
+
     return {
-      id, shape, r,
-      x: entering ? -r - p.random(0, 300) : p.random(60, maxX),
-      y,
-      vx: p.random(0.3, 0.6),
-      vy: p.random(-0.3, 0.3),
-      rot: p.random(-0.3, 0.3),
+      id, shape, rBase, r,
+      x: px, y: py,
+      vx: p.random(0.3, 0.8) * (p.random() > 0.5 ? 1 : -1),
+      vy: p.random(0.3, 0.8) * (p.random() > 0.5 ? 1 : -1),
+      rot: p.random(-Math.PI, Math.PI),
       parent: id,
-      heldPress: false,   // contacto activo (touch o click izquierdo sostenido)
-      heldPersist: false, // selección persistente (click derecho, se mantiene hasta volver a tocar)
+      heldPress: false,
+      heldPersist: false,
       active: true,
       entering: entering
     };
@@ -124,21 +143,20 @@ const sketchColaboracion = (p) => {
     return count;
   }
 
-  // mueve una figura mientras se la sostiene (dedo o click izquierdo). Si su
-  // grupo todavía no llegó al umbral, no la deja cruzar la diagonal a mano,
-  // igual que el movimiento automático.
   function moveHeldParticle(pt, x, y) {
-    let nx = p.constrain(x, pt.r, p.width - pt.r);
-    let ny = p.constrain(y, pt.r, p.height - pt.r);
+    let nx = x;
+    let ny = y;
 
     const empowered = groupSizeOf(pt.id) >= GROUP_THRESHOLD;
     if (!empowered) {
       const sd = sideDistance(nx, ny);
-      if (sd < pt.r) {
-        const push = pt.r - sd;
-        nx += lineNormal.x * allowedSign * push;
-        ny += lineNormal.y * allowedSign * push;
+      if (sd > -pt.r) {
+        const push = sd + pt.r;
+        nx -= lineNormal.x * push;
+        ny -= lineNormal.y * push;
       }
+      nx = p.constrain(nx, pt.r, p.width - pt.r);
+      ny = p.constrain(ny, pt.r, p.height - pt.r);
     }
 
     pt.x = nx;
@@ -182,19 +200,10 @@ const sketchColaboracion = (p) => {
 
   function drawDivider() {
     p.stroke(BLACK);
-    p.strokeWeight(4);
-    p.line(lineTop.x, lineTop.y, lineBottom.x, lineBottom.y);
-    p.stroke(RED);
-    p.strokeWeight(1.5);
-    p.line(
-      lineTop.x + lineNormal.x * 9, lineTop.y + lineNormal.y * 9,
-      lineBottom.x + lineNormal.x * 9, lineBottom.y + lineNormal.y * 9
-    );
+    p.strokeWeight(5 * currentScale);
+    p.line(lineBottom.x, lineBottom.y, lineTop.x, lineTop.y);
   }
 
-  // Conecta TODAS las figuras que estén siendo seleccionadas al mismo tiempo
-  // (uno o varios dedos en simultáneo, o varias marcadas con click derecho).
-  // Ya no hace falta acercarlas ni hacer pinza: alcanza con tenerlas activas juntas.
   function checkConnections() {
     const held = particles.filter(pt => pt.active && isHeld(pt));
     for (let i = 0; i < held.length; i++) {
@@ -203,8 +212,6 @@ const sketchColaboracion = (p) => {
         if (find(a.id) !== find(b.id)) {
           union(a.id, b.id);
           edges.push([a.id, b.id]);
-          // una vez conectadas, se libera la selección persistente:
-          // ya cumplió su función, no hace falta seguir "marcándolas".
           a.heldPersist = false;
           b.heldPersist = false;
         }
@@ -222,43 +229,45 @@ const sketchColaboracion = (p) => {
 
       for (const pt of group) {
         if (pt.entering) {
-          pt.x += 1.5;
-          if (pt.x > pt.r) pt.entering = false;
+          pt.x += 2 * currentScale;
+          if (sideDistance(pt.x, pt.y) > -pt.r - (20 * currentScale)) {
+              pt.entering = false;
+          }
           continue;
         }
 
-        pt.x += pt.vx;
-        pt.y += pt.vy;
-        if (pt.y < pt.r) { pt.y = pt.r; pt.vy = Math.abs(pt.vy); }
-        if (pt.y > p.height - pt.r) { pt.y = p.height - pt.r; pt.vy = -Math.abs(pt.vy); }
-        if (pt.x < pt.r) { pt.x = pt.r; pt.vx = Math.abs(pt.vx); }
-
+        pt.x += pt.vx * currentScale;
+        pt.y += pt.vy * currentScale;
+        
         const sd = sideDistance(pt.x, pt.y);
-        if (!empowered && sd < pt.r) {
-          // rebota contra la diagonal: la empuja de vuelta y refleja su velocidad
-          const push = pt.r - sd;
-          pt.x += lineNormal.x * allowedSign * push;
-          pt.y += lineNormal.y * allowedSign * push;
-          const vn = pt.vx * lineNormal.x + pt.vy * lineNormal.y;
-          pt.vx -= 2 * vn * lineNormal.x;
-          pt.vy -= 2 * vn * lineNormal.y;
-        }
 
-        // una vez cruzada la línea, ya no puede retroceder
-        if (sd < 0) {
-          const vnAllowed = (pt.vx * lineNormal.x + pt.vy * lineNormal.y) * allowedSign;
-          if (vnAllowed > 0) {
-            const vn = pt.vx * lineNormal.x + pt.vy * lineNormal.y;
-            pt.vx -= 2 * vn * lineNormal.x;
-            pt.vy -= 2 * vn * lineNormal.y;
+        if (sd > 0) {
+          pt.vx = Math.abs(pt.vx) + 0.02;
+          pt.vy = -Math.abs(pt.vy) - 0.02;
+
+          if (pt.x - pt.r > p.width || pt.y + pt.r < 0) {
+            pt.active = false;
+            pt.parent = pt.id;
+            edges = edges.filter(([i, j]) => i !== pt.id && j !== pt.id);
+            exitedThisFrame.push(pt);
           }
-        }
+        } else {
+          if (pt.y < pt.r) { pt.y = pt.r; pt.vy = Math.abs(pt.vy); }
+          if (pt.y > p.height - pt.r) { pt.y = p.height - pt.r; pt.vy = -Math.abs(pt.vy); }
+          if (pt.x < pt.r) { pt.x = pt.r; pt.vx = Math.abs(pt.vx); }
+          if (pt.x > p.width - pt.r) { pt.x = p.width - pt.r; pt.vx = -Math.abs(pt.vx); }
 
-        if (pt.x - pt.r > p.width) {
-          pt.active = false;
-          pt.parent = pt.id;
-          edges = edges.filter(([i, j]) => i !== pt.id && j !== pt.id);
-          exitedThisFrame.push(pt);
+          if (!empowered && sd > -pt.r) {
+            const push = sd + pt.r;
+            pt.x -= lineNormal.x * push;
+            pt.y -= lineNormal.y * push;
+            
+            const vn = pt.vx * lineNormal.x + pt.vy * lineNormal.y;
+            if (vn > 0) {
+              pt.vx -= 2 * vn * lineNormal.x;
+              pt.vy -= 2 * vn * lineNormal.y;
+            }
+          }
         }
       }
     }
@@ -268,26 +277,35 @@ const sketchColaboracion = (p) => {
 
   function handleExits() {
     const activeCount = particles.filter(q => q.active).length;
+    const leftCount = particles.filter(q => q.active && sideDistance(q.x, q.y) < 0).length;
+
     if (activeCount === 0) {
       fullReset();
-    } else if (activeCount < GROUP_THRESHOLD) {
-      activateOneWaiting();
+    } else if (leftCount > 0 && leftCount < GROUP_THRESHOLD) {
+      const needed = GROUP_THRESHOLD - leftCount;
+      const waiting = particles.filter(q => !q.active);
+      for(let i = 0; i < needed && i < waiting.length; i++) {
+         reviveParticle(waiting[i]);
+      }
     }
   }
 
   function applySpringConstraints() {
+    const scaledMaxStretch = BASE_MAX_STRETCH * currentScale;
+    const springFactor = 0.12; // Valor constante de tensión
+
     for (const [i, j] of edges) {
       const a = particles[i], b = particles[j];
       if (!a.active || !b.active) continue;
       const d = p.dist(a.x, a.y, b.x, b.y);
-      if (d > MAX_STRETCH) {
-        const excess = d - MAX_STRETCH;
+      if (d > scaledMaxStretch) {
+        const excess = d - scaledMaxStretch;
         const dx = (b.x - a.x) / d, dy = (b.y - a.y) / d;
-        // una figura que ya cruzó la línea nunca es tironeada hacia atrás por el resorte
-        const aCrossed = sideDistance(a.x, a.y) < 0;
-        const bCrossed = sideDistance(b.x, b.y) < 0;
-        if (!isHeld(a) && !aCrossed) { a.x += dx * excess * SPRING_FACTOR; a.y += dy * excess * SPRING_FACTOR; }
-        if (!isHeld(b) && !bCrossed) { b.x -= dx * excess * SPRING_FACTOR; b.y -= dy * excess * SPRING_FACTOR; }
+        const aCrossed = sideDistance(a.x, a.y) > 0;
+        const bCrossed = sideDistance(b.x, b.y) > 0;
+        
+        if (!isHeld(a) && !aCrossed) { a.x += dx * excess * springFactor; a.y += dy * excess * springFactor; }
+        if (!isHeld(b) && !bCrossed) { b.x -= dx * excess * springFactor; b.y -= dy * excess * springFactor; }
       }
     }
   }
@@ -297,16 +315,21 @@ const sketchColaboracion = (p) => {
       if (!pt.active || pt.entering) continue;
       const rootId = find(pt.id);
       const size = roots[rootId] ? roots[rootId].length : 1;
-      if (pt.y < pt.r) pt.y = pt.r;
-      if (pt.y > p.height - pt.r) pt.y = p.height - pt.r;
-      if (pt.x < pt.r) pt.x = pt.r;
-      if (size < GROUP_THRESHOLD) {
-        const sd = sideDistance(pt.x, pt.y);
-        if (sd < pt.r) {
-          const push = pt.r - sd;
-          pt.x += lineNormal.x * allowedSign * push;
-          pt.y += lineNormal.y * allowedSign * push;
-        }
+      
+      const sd = sideDistance(pt.x, pt.y);
+      
+      if (sd <= 0) {
+          if (pt.y < pt.r) pt.y = pt.r;
+          if (pt.y > p.height - pt.r) pt.y = p.height - pt.r;
+          if (pt.x < pt.r) pt.x = pt.r;
+          
+          if (size < GROUP_THRESHOLD) {
+            if (sd > -pt.r) {
+              const push = sd + pt.r;
+              pt.x -= lineNormal.x * push;
+              pt.y -= lineNormal.y * push;
+            }
+          }
       }
     }
   }
@@ -317,27 +340,29 @@ const sketchColaboracion = (p) => {
     pt.heldPress = false;
     pt.heldPersist = false;
     pt.parent = pt.id;
-    pt.rot = p.random(-0.3, 0.3);
-    pt.x = -pt.r - p.random(0, 260);
+    pt.rot = p.random(-Math.PI, Math.PI);
+    pt.x = -pt.r - p.random(10, 100);
     pt.y = p.random(pt.r, p.height - pt.r);
-    pt.vx = p.random(0.3, 0.6);
-    pt.vy = p.random(-0.3, 0.3);
+    pt.vx = p.random(0.4, 0.8);
+    pt.vy = p.random(-0.5, 0.5);
+    pt.r = pt.rBase * currentScale; 
   }
 
   function fullReset() {
     edges = [];
-    for (const pt of particles) reviveParticle(pt);
-  }
-
-  function activateOneWaiting() {
-    const waiting = particles.filter(q => !q.active);
-    if (waiting.length === 0) return;
-    reviveParticle(p.random(waiting));
+    for (const pt of particles) {
+      reviveParticle(pt);
+      pt.entering = false;
+      do {
+        pt.x = p.random(pt.r, p.width - pt.r);
+        pt.y = p.random(pt.r, p.height - pt.r);
+      } while (sideDistance(pt.x, pt.y) > -pt.r - 10);
+    }
   }
 
   function drawEdges() {
     p.stroke(RED);
-    p.strokeWeight(2);
+    p.strokeWeight(2 * currentScale);
     for (const [i, j] of edges) {
       const a = particles[i], b = particles[j];
       if (!a.active || !b.active) continue;
@@ -349,43 +374,60 @@ const sketchColaboracion = (p) => {
     for (const pt of particles) {
       if (!pt.active) continue;
       const size = roots[find(pt.id)] ? roots[find(pt.id)].length : 1;
-      p.fill(size >= GROUP_THRESHOLD ? RED : BLACK);
-      drawShape(pt, pt.id === hoveredId && !isHeld(pt), isHeld(pt));
+      
+      const heldState = isHeld(pt);
+      const groupConnected = size >= GROUP_THRESHOLD;
+      
+      p.fill(groupConnected || heldState ? RED : BLACK);
+      
+      drawShape(pt, pt.id === hoveredId && !heldState, heldState);
     }
   }
 
-  // isHovered: el cursor está encima (solo mouse) -> anillo fino, indica "podés interactuar"
-  // isHeld: está seleccionada ahora mismo -> anillo grueso color BG, bien visible
-  function drawShape(pt, isHovered, isHeld) {
+  function drawShape(pt, isHovered, isHeldState) {
     p.push();
     p.translate(pt.x, pt.y);
-    if (isHeld) {
-      p.stroke(BG);
-      p.strokeWeight(4);
-    } else if (isHovered) {
-      p.stroke(RED);
-      p.strokeWeight(2);
-    } else {
+    p.rotate(pt.rot);
+
+    if (isHeldState) {
       p.noStroke();
-    }
-    if (pt.shape === 'circle') {
-      p.circle(0, 0, pt.r * 2);
-    } else if (pt.shape === 'square') {
-      p.rotate(pt.rot);
-      p.rectMode(p.CENTER);
-      p.rect(0, 0, pt.r * 1.8, pt.r * 1.8);
+      drawBaseShape(pt.shape, pt.r);
+      
+      p.noFill();
+      p.stroke(RED);
+      p.strokeWeight(2.5 * currentScale);
+      drawBaseShape(pt.shape, pt.r * 1.5); 
     } else {
-      p.rotate(pt.rot);
-      p.triangle(-pt.r, pt.r * 0.8, pt.r, pt.r * 0.8, 0, -pt.r);
+      if (isHovered) {
+        p.stroke(RED);
+        p.strokeWeight(2 * currentScale);
+      } else {
+        p.noStroke();
+      }
+      drawBaseShape(pt.shape, pt.r);
     }
+    
     p.pop();
   }
 
+  function drawBaseShape(shape, r) {
+    if (shape === 'circle') {
+      p.circle(0, 0, r * 2);
+    } else if (shape === 'square') {
+      p.rectMode(p.CENTER);
+      p.rect(0, 0, r * 1.8, r * 1.8);
+    } else {
+      p.triangle(-r, r * 0.8, r, r * 0.8, 0, -r);
+    }
+  }
+
   function idOfParticleAt(x, y) {
+    const scaledTolerance = BASE_HOVER_TOLERANCE * currentScale;
     for (let i = particles.length - 1; i >= 0; i--) {
       const pt = particles[i];
-      if (!pt.active || pt.entering) continue;
-      if (p.dist(x, y, pt.x, pt.y) < pt.r + HOVER_TOLERANCE) return pt.id;
+      // Se elimina la restricción !pt.entering para poder detectar figuras entrando
+      if (!pt.active) continue; 
+      if (p.dist(x, y, pt.x, pt.y) < pt.r + scaledTolerance) return pt.id;
     }
     return null;
   }
@@ -395,14 +437,12 @@ const sketchColaboracion = (p) => {
     return id === null ? null : particles[id];
   }
 
-  // ---------- TOUCH: mantener el dedo sobre una figura la selecciona y la
-  // deja arrastrar; en cuanto hay 2+ seleccionadas al mismo tiempo, se
-  // conectan solas (no hace falta juntarlas para eso) ----------
   p.touchStarted = () => {
     for (const t of p.touches) {
       if (activeTouches[t.id] !== undefined) continue;
       const pt = findParticleAt(t.x, t.y);
       if (pt) {
+        pt.entering = false; // Permite selección temprana
         pt.heldPress = true;
         activeTouches[t.id] = pt.id;
       }
@@ -433,17 +473,14 @@ const sketchColaboracion = (p) => {
     return false;
   };
 
-  // ---------- MOUSE ----------
-  // click izquierdo sostenido: selección momentánea + arrastre, igual que un dedo.
-  // click derecho: selección persistente (toggle) — se maneja arriba, en el
-  // listener de 'contextmenu', no acá.
   p.mousePressed = (event) => {
     if (!mouseInsideCanvas()) return;
-    if (event && event.button === 2) return; // lo maneja el listener de contextmenu
+    if (event && event.button === 2) return;
 
     const pt = findParticleAt(p.mouseX, p.mouseY);
     if (!pt) return;
 
+    pt.entering = false; // Permite selección temprana
     pt.heldPress = true;
     activeTouches['mouse'] = pt.id;
   };

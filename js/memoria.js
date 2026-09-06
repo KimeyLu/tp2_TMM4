@@ -12,10 +12,23 @@ const Memoria = (p) => {
     const SHAPE_SPEED = 1.5; // velocidad fija para todas las formas
     let WRAP_LEN; // distancia total del ciclo (igual para todas, evita desfasajes)
     const ROTATION_ANGLE = p.radians(-43); // rotacion del canvas, ajustable
+
+    // ---------- escala de tamaño (más grande al expandirse a pantalla completa) ----------
+    const BASE_SHAPE_SIZE = 24;
+    const BASE_CURSOR_SIZE = 30;
+    const BASE_MEMORY_START_X = 120;
+    const BASE_MEMORY_COL_SPACING = 80;
+    const BASE_MEMORY_ROW_SPACING = 22;
+    let SIZE_SCALE = 1;
+
+    function computeSizeScale() {
+        const ratio = Math.min(p.width, p.height) / 400;
+        return ratio <= 1 ? ratio : ratio * 1.25;
+    }
  
     // cursor
-    let cursorSize = 30;
-    const CURSOR_BASE_SIZE = 30;
+    let cursorSize;
+    let CURSOR_BASE_SIZE;
     let cursorColor = '#F0D583';
     let hitTimer = 0;
     const HIT_DURATION = 18; // frames que dura la animacion de "achique"
@@ -24,15 +37,24 @@ const Memoria = (p) => {
     const MEMORY_COLS = 3;
     const MEMORY_ROWS = 4;
     const MEMORY_CAPACITY = MEMORY_COLS * MEMORY_ROWS;
-    const MEMORY_START_X = 120;
-    let MEMORY_START_Y; // depende de p.height, se asigna en setup (createCanvas define p.height recien ahi)
-    const MEMORY_COL_SPACING = 80; // distancia horizontal entre columnas
-    const MEMORY_ROW_SPACING = 22; // distancia vertical entre formas de una misma columna
+    let MEMORY_START_X;
+    let MEMORY_START_Y; // depende de p.height, se asigna en setup
+    let MEMORY_COL_SPACING;
+    let MEMORY_ROW_SPACING;
     const SLIDE_EASE = 0.2; // suaviza la aparicion de cada clon en su lugar
     const RESET_FADE_DURATION = 30; // frames que tardan en desvanecerse al reiniciar
+
+    function computeSizes() {
+        SIZE_SCALE = computeSizeScale();
+        CURSOR_BASE_SIZE = BASE_CURSOR_SIZE * SIZE_SCALE;
+        MEMORY_START_X = BASE_MEMORY_START_X * SIZE_SCALE;
+        MEMORY_COL_SPACING = BASE_MEMORY_COL_SPACING * SIZE_SCALE;
+        MEMORY_ROW_SPACING = BASE_MEMORY_ROW_SPACING * SIZE_SCALE;
+    }
  
     p.setup = function() {
         p.createCanvas(400, 400);
+        computeSizes();
         lineY = p.height / 2;
         WRAP_LEN = p.width + 180; // buffer fijo, mayor al tamanio maximo de una forma
         MEMORY_START_Y = p.height / 4;
@@ -40,6 +62,29 @@ const Memoria = (p) => {
         for (let i = 0; i < N_SHAPES; i++) {
             shapes.push(makeShape(i * (WRAP_LEN / N_SHAPES)));
         }
+    }
+
+    p.windowResized = function() {
+        const oldScale = SIZE_SCALE;
+        const oldWrap = WRAP_LEN;
+
+        const { w, h } = window.getCanvasTargetSize('memoria', 400, 400);
+        p.resizeCanvas(w, h);
+
+        computeSizes();
+        lineY = p.height / 2;
+        WRAP_LEN = p.width + 180;
+        MEMORY_START_Y = p.height / 4;
+
+        const sizeRatio = SIZE_SCALE / oldScale;
+        const wrapRatio = WRAP_LEN / oldWrap;
+
+        for (const s of shapes) {
+            s.size *= sizeRatio;
+            s.offset *= wrapRatio; // mantiene la separación relativa entre formas
+        }
+        for (const m of memories) m.size *= sizeRatio;
+        for (const f of fadingOut) f.size *= sizeRatio;
     }
  
     p.draw = function() {
@@ -82,7 +127,7 @@ const Memoria = (p) => {
             offset: offset, // posicion de referencia dentro del ciclo, fija
             lastCycle: 0,
             clicked: false, // evita generar mas de un clon por ciclo
-            size: p.random(24, 24),
+            size: BASE_SHAPE_SIZE * SIZE_SCALE,
             type: p.random(TYPES),
             color: p.random(COLORS)
         };
