@@ -191,6 +191,16 @@ const sketchEmpatia = (p) => {
       if (pt.settled) continue;
 
       if (draggingPt !== pt) {
+        // El impulso de "repulsión" al soltarla antes de tiempo se va
+        // apagando de a poco, en vez de quedar rápida para siempre
+        const NORMAL_SPEED = 0.4;
+        const speed = Math.hypot(pt.vx, pt.vy);
+        if (speed > NORMAL_SPEED) {
+          const decayed = Math.max(NORMAL_SPEED, speed * 0.985);
+          pt.vx = (pt.vx / speed) * decayed;
+          pt.vy = (pt.vy / speed) * decayed;
+        }
+
         pt.x += pt.vx;
         pt.y += pt.vy;
 
@@ -379,7 +389,7 @@ const sketchEmpatia = (p) => {
       // la figura es "repelida": sale despedida hacia su lado en vez de
       // teletransportarse al punto donde se la agarró.
       if (draggingPt.y <= lineY || draggingPt.progress < 1) {
-        const speed = p.random(2.5, 4);
+        const speed = p.random(1, 1.6);
         // Ángulo apuntando hacia arriba (alejándose de la línea) con variación
         const angle = -p.HALF_PI + p.random(-0.7, 0.7);
         draggingPt.vx = Math.cos(angle) * speed;

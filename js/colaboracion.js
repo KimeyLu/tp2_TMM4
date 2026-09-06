@@ -25,13 +25,13 @@ const sketchColaboracion = (p) => {
 
   function setupLine() {
     lineBottom = { x: 0, y: p.height };
-    lineTop = { x: p.width, y: 0};
+    lineTop = { x: p.width, y: p.height/20 };
     
     const dx = lineTop.x - lineBottom.x;
     const dy = lineTop.y - lineBottom.y;
     const len = Math.hypot(dx, dy) || 1;
     
-    lineNormal = { x: p.height / len, y: p.width / len };
+    lineNormal = { x: -dy / len, y: dx / len };
   }
 
   function sideDistance(x, y) {
@@ -266,6 +266,15 @@ p.windowResized = () => {
               pt.vx -= 2 * vn * lineNormal.x;
               pt.vy -= 2 * vn * lineNormal.y;
             }
+          }
+
+          // Tope de seguridad: evita que la velocidad de flotación se
+          // acumule con el tiempo por cualquier imprecisión numérica
+          const MAX_FLOAT_SPEED = 1.1;
+          const spd = Math.hypot(pt.vx, pt.vy);
+          if (spd > MAX_FLOAT_SPEED) {
+            pt.vx = (pt.vx / spd) * MAX_FLOAT_SPEED;
+            pt.vy = (pt.vy / spd) * MAX_FLOAT_SPEED;
           }
         }
       }
