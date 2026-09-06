@@ -32,11 +32,11 @@ const sketchAnsiedad = (p) => {
     target = { x: cx, y: cy };
   };
 
-  // p.windowResized = () => {
-  //   p.resizeCanvas(container.offsetWidth, container.offsetHeight);
-  //   recalcGeometry();
-  // };
-function mouseInsideCanvas() {
+p.windowResized = () => {
+  const { w, h } = window.getCanvasTargetSize('ansiedad', 400, 400);
+  p.resizeCanvas(w, h);
+  recalcGeometry();
+};function mouseInsideCanvas() {
     return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
 }
 

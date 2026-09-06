@@ -85,19 +85,10 @@ html, body {
   display: block;
 }
 
-.item.expanded #memoria canvas,
-.item.expanded #herencia canvas,
-.item.expanded #caducidad canvas,
-.item.expanded #colaboracion canvas,
-.item.expanded #identidad canvas,
-.item.expanded #empatia canvas,
-.item.expanded #expectativa canvas,
-.item.expanded #incertidumbre canvas,
-.item.expanded #ansiedad canvas {
-  width: 100vw !important;
-  height: 100vh !important;
+.item.expanded canvas {
+  width: auto !important;
+  height: auto !important;
 }
-
 .titulo {
     margin: 0;
     font-family: sans-serif;

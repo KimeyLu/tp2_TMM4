@@ -58,9 +58,9 @@ const sketchColaboracion = (p) => {
     }
   };
 
-  p.windowResized = () => {
-    const w = container ? container.clientWidth : 400;
-    const h = container ? container.clientHeight : 400;
+p.windowResized = () => {
+    // Usamos la misma lógica global que armamos para el resto
+    const { w, h } = window.getCanvasTargetSize('colaboracion', 400, 400);
     
     const oldW = p.width;
     const oldH = p.height;
@@ -69,7 +69,7 @@ const sketchColaboracion = (p) => {
     updateScale();
     setupLine();
 
-    // Mantener la proporción de las partículas al cambiar el tamaño de la ventana
+    // Mantener la proporción y posición de las partículas al cambiar el tamaño
     const scaleX = w / oldW;
     const scaleY = h / oldH;
     
@@ -79,7 +79,6 @@ const sketchColaboracion = (p) => {
       pt.y *= scaleY;
     }
   };
-
   function initParticles() {
     particles = [];
     edges = [];

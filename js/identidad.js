@@ -28,7 +28,10 @@ const sketchIdentidad = (p) => {
     startTime = p.millis();
     lastSpawnTime = startTime;
   }
- 
+ p.windowResized = function() {
+  const { w, h } = window.getCanvasTargetSize('identidad', 400, 400);
+  p.resizeCanvas(w, h);
+}
   p.draw = function() {
     p.background(bgColor);
  

@@ -53,7 +53,9 @@ window.getCanvasTargetSize = function (containerId, fallbackW, fallbackH) {
   const el = document.getElementById(containerId);
   const item = el && el.closest('.item');
   if (item && item.classList.contains('expanded')) {
-    return { w: window.innerWidth, h: window.innerHeight };
+    // Calcula cuál es el lado más corto de la pantalla para mantener el cuadrado
+    const maxSize = Math.min(window.innerWidth, window.innerHeight);
+    return { w: maxSize, h: maxSize };
   }
   return { w: fallbackW, h: fallbackH };
 };

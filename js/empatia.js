@@ -34,12 +34,11 @@ const sketchEmpatia = (p) => {
     colRed = p.color(RED);
     resetAll();
   };
-/*
-  p.windowResized = () => {
-    p.resizeCanvas(container.offsetWidth, container.offsetHeight);
-  };
-  */
-
+p.windowResized = () => {
+  const { w, h } = window.getCanvasTargetSize('empatia', 400, 400);
+  p.resizeCanvas(w, h);
+  resetAll();
+};
   function resetAll() {
     particles = [];
     networkEdges = [];
