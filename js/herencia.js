@@ -8,35 +8,37 @@ const Herencia = (p) => {
  
   const TYPES = ['circle', 'square', 'triangle'];
   const COLORS = ['#F0D583', '#121212'];
-
+ 
   // tamaño base de las formas (a 400x400). El tamaño real (SHAPE_SIZE) se
-  // recalcula con computeSizeScale() para que se vea más grande en fullscreen.
+  // recalcula con computeSizeScale() para que se vea bien en otros tamaños
+  // de canvas (por ejemplo en fullscreen).
   const BASE_SHAPE_SIZE = 24;
   let SHAPE_SIZE;
   let SIZE_SCALE = 1;
-
+ 
   function computeSizeScale() {
     const ratio = Math.min(p.width, p.height) / 400;
     return ratio <= 1 ? ratio : ratio * 1.25;
   }
-
-  // posiciones donde quedan las formas al soltarlas en C. Se calculan como
-  // proporción del canvas (antes eran píxeles fijos calculados a mano para
-  // 400x400), así se recalculan bien si el canvas cambia de tamaño.
+ 
+  // posiciones donde quedan las formas al soltarlas en C, como proporcion
+  // del canvas (antes eran pixeles fijos calculados a mano para 400x400),
+  // asi se recalculan bien si el canvas cambia de tamaño.
   let SNAP_A, SNAP_B;
  
-  const ROTATION_DEG = -43; // angulo de rotacion de todo el sketch
-
+  const ROTATION_DEG = -40; // angulo de rotacion de todo el sketch
+ 
   function computeLayout() {
-    rectA = { x: p.width / 5, y: p.height / 4.7, w: 50, h: 50 };
-    rectC = { x: p.width / 2.3, y: p.height / 3.5, w: 50, h: 50 };
-    rectB = { x: p.width / 1.5, y: p.height / 4.7, w: 50, h: 50 };
-    SNAP_A = { x: p.width * 0.375, y: p.height * 0.345 };
-    SNAP_B = { x: p.width * 0.6, y: p.height * 0.345 };
+    rectA = { x: p.width / 5, y: p.height / 5, w: p.width / 8, h: p.height / 8 };
+    rectC = { x: p.width / 2.3, y: p.height / 4, w: p.width / 8, h: p.height / 8 };
+    rectB = { x: p.width / 1.5, y: p.height / 5, w: p.width / 8, h: p.height / 8 };
+    // equivalen a (150,128) y (240,128) en un canvas de 400x400
+    SNAP_A = { x: p.width * 0.375, y: p.height * 0.32 };
+    SNAP_B = { x: p.width * 0.6, y: p.height * 0.32 };
   }
-
-  // reubica las formas padre existentes según el layout ACTUAL: si todavía
-  // no fueron soltadas en C, al centro de su rectángulo; si ya estaban
+ 
+  // reubica las formas padre existentes segun el layout ACTUAL: si todavia
+  // no fueron soltadas en C, al centro de su rectangulo; si ya estaban
   // colocadas, al punto de snap correspondiente. Esto es lo que evita que
   // se vean "corridas" fuera de su cuadrado al cambiar el tamaño del canvas.
   function repositionParents() {
@@ -67,19 +69,18 @@ const Herencia = (p) => {
     SHAPE_SIZE = BASE_SHAPE_SIZE * SIZE_SCALE;
     computeLayout();
  
-    parentA = spawnShape('A');
-    parentB = spawnShape('B');
+    [parentA, parentB] = spawnParentPair();
   }
-
+ 
   p.windowResized = function() {
     const { w, h } = window.getCanvasTargetSize('herencia', 400, 400);
     p.resizeCanvas(w, h);
-
+ 
     const oldScale = SIZE_SCALE;
     computeLayout();
     SIZE_SCALE = computeSizeScale();
     SHAPE_SIZE = BASE_SHAPE_SIZE * SIZE_SCALE;
-
+ 
     const ratio = SIZE_SCALE / oldScale;
     if (parentA) parentA.size *= ratio;
     if (parentB) parentB.size *= ratio;
@@ -92,7 +93,7 @@ const Herencia = (p) => {
       c.baseSize *= ratio;
       c.size *= ratio;
     }
-
+ 
     repositionParents();
   }
  
@@ -103,7 +104,7 @@ const Herencia = (p) => {
     p.translate(p.width / 2, p.height / 2);
     p.rotate(p.radians(ROTATION_DEG));
     p.translate(-p.width / 2, -p.height / 2);
-    
+ 
     p.stroke('#F0D583');
     p.strokeWeight(2);
     p.line(-100, p.height / 2, p.width + 100, p.height / 2);
@@ -130,6 +131,18 @@ const Herencia = (p) => {
   }
  
   // ---------- formas padre (A y B) ----------
+  // genera el par de formas para A y B, asegurando que siempre tengan
+  // colores distintos entre si (el tipo de forma puede repetirse sin problema)
+  function spawnParentPair() {
+    const a = spawnShape('A');
+    const otherColor = COLORS.find(c => c !== a.color) || a.color;
+ 
+    const b = spawnShape('B');
+    b.color = otherColor;
+ 
+    return [a, b];
+  }
+ 
   function spawnShape(slot) {
     const rect = slot === 'A' ? rectA : rectB;
     return {
@@ -189,11 +202,15 @@ const Herencia = (p) => {
   }
  
   function isOverRectC(mx, my) {
+    // zona de soltado un poco mas amplia que el rect visual, para que sea comodo soltar
     const margin = 40;
     return mx > rectC.x - margin && mx < rectC.x + rectC.w + margin &&
            my > rectC.y - margin && my < rectC.y + rectC.h + margin;
   }
  
+  // como todo el sketch se dibuja rotado, esta funcion convierte la posicion
+  // del mouse (que p5 siempre da en coordenadas de pantalla) a las coordenadas
+  // "del mundo" que usan las formas, aplicando la rotacion inversa
   function screenToWorld(mx, my) {
     const cx = p.width / 2;
     const cy = p.height / 2;
@@ -213,6 +230,7 @@ const Herencia = (p) => {
     return { type, color };
   }
  
+  // easings para las animaciones
   function easeOutBack(t) {
     const c1 = 1.70158;
     const c3 = c1 + 1;
@@ -228,11 +246,14 @@ const Herencia = (p) => {
     return 1 - (1 - t) * (1 - t);
   }
  
-  const GROW_STEP = 0.06;
-  const TOLINE_STEP = 0.025;
-  const MERGE_STEP = 0.04;
-  const SHRINK_STEP = 0.08;
+  const GROW_STEP = 0.06;    // velocidad de la animacion de aparicion
+  const TOLINE_STEP = 0.025; // velocidad del desplazamiento hacia la linea
+  const MERGE_STEP = 0.04;   // velocidad de la fusion de A y B hacia C
+  const SHRINK_STEP = 0.08;  // velocidad del achicado al soltarse en C
  
+  // ---------- fusion de A y B en C ----------
+  // arranca recien cuando ambas formas estan sueltas en C y ya terminaron
+  // su animacion de achicado a la mitad
   function TryStartMerge() {
     if (parentA.placed && parentB.placed && parentA.shrinkT >= 1 && parentB.shrinkT >= 1) {
       startMerge();
@@ -244,6 +265,8 @@ const Herencia = (p) => {
     const centerX = (SNAP_A.x + SNAP_B.x) / 2;
     const centerY = (SNAP_A.y + SNAP_B.y) / 2;
  
+    // A y B (ya reducidas a la mitad) viajan hacia C encogiendose del todo
+    // y desvaneciendose; recien al terminar esa fusion nace la forma hija
     merging.push({
       a: { type: parentA.type, color: parentA.color, x: parentA.x, y: parentA.y, startX: parentA.x, startY: parentA.y, size: parentA.size },
       b: { type: parentB.type, color: parentB.color, x: parentB.x, y: parentB.y, startX: parentB.x, startY: parentB.y, size: parentB.size },
@@ -254,8 +277,8 @@ const Herencia = (p) => {
       traits
     });
  
-    parentA = spawnShape('A');
-    parentB = spawnShape('B');
+    // las formas padre desaparecen de A y B y nacen otras nuevas ahi
+    [parentA, parentB] = spawnParentPair();
   }
  
   function AnimateMerging() {
@@ -318,7 +341,7 @@ const Herencia = (p) => {
     children.push({
       type: traits.type,
       color: traits.color,
-      x: x+5,
+      x: x + 5,
       y: y,
       startY: y,
       targetY: p.height / 2,
@@ -330,13 +353,15 @@ const Herencia = (p) => {
       speed: 2
     });
   }
-      function mouseInsideCanvas() {
+ 
+  // ---------- interaccion con el mouse ----------
+  function mouseInsideCanvas() {
     return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
-}
-
+  }
+ 
   p.mousePressed = () => {
     if (!mouseInsideCanvas()) return;
-const w = screenToWorld(p.mouseX, p.mouseY);
+    const w = screenToWorld(p.mouseX, p.mouseY);
     if (parentA && !parentA.placed && isOver(parentA, w.x, w.y)) {
       draggingShape = parentA;
     } else if (parentB && !parentB.placed && isOver(parentB, w.x, w.y)) {
@@ -362,8 +387,9 @@ const w = screenToWorld(p.mouseX, p.mouseY);
       draggingShape.x = snap.x;
       draggingShape.y = snap.y;
       draggingShape.placed = true;
-      draggingShape.shrinkT = 0;
+      draggingShape.shrinkT = 0; // arranca la animacion de achicado a la mitad
     } else {
+      // si no se solto sobre C, vuelve a su rectangulo de origen
       const rect = draggingShape.slot === 'A' ? rectA : rectB;
       draggingShape.x = rect.x + rect.w / 2;
       draggingShape.y = rect.y + rect.h / 2;
