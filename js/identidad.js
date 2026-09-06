@@ -1,15 +1,17 @@
 const sketchIdentidad = (p) => {
  
-  // ------ constantes / configuración (ahora relativas) ------
-  // lineY ahora es height/2, pero ajustado para que quede en la mitad inferior
-  const lineYRatio = 0.5; // 50% del height
-  const squareSizeRatio = 0.06; // 6% del width
-  const lineSpeedRatio = 0.005; // 0.5% del width por frame
-  const leaveSpeedRatio = 0.005; // 0.5% del width por frame
+  // ------ constantes / configuración ------
+  // Definimos 3 alturas relativas para las distintas zonas
+  const lineYRatio = 0.25;       // 25% (Arriba: camino original)
+  const dividerYRatio = 0.5;     // 50% (Medio: frontera punteada)
+  const newLineYRatio = 0.75;    // 75% (Abajo: camino de identidad propia)
+  
+  const squareSizeRatio = 0.06;
+  const lineSpeedRatio = 0.005;
+  const leaveSpeedRatio = 0.005;
   const maxLineShapes = 10;
-  const spawnDelay = 2000;   // tiempo en ms (no necesita ser relativo)
-  const spawnInterval = 500; // tiempo en ms (no necesita ser relativo)
-  const collisionThresholdRatio = 0.3; // 30% del width
+  const spawnDelay = 2000;
+  const spawnInterval = 500;
   
   const colorLine = '#121212';
   const colorIdentidad = '#970510';
@@ -27,7 +29,7 @@ const sketchIdentidad = (p) => {
   const ROTATION_ANGLE = p.radians(-43);
   
   // Variables que almacenan los valores calculados en tiempo real
-  let lineY, squareSize, lineSpeed, leaveSpeed, collisionThreshold;
+  let lineY, dividerY, newLineY, squareSize, lineSpeed, leaveSpeed;
   let canvasWidth, canvasHeight;
   
   p.setup = function() {
@@ -46,15 +48,18 @@ const sketchIdentidad = (p) => {
   function updateDimensions() {
     canvasWidth = p.width;
     canvasHeight = p.height;
+    
+    // Asignamos las alturas de las 3 líneas
     lineY = canvasHeight * lineYRatio;
+    dividerY = canvasHeight * dividerYRatio;
+    newLineY = canvasHeight * newLineYRatio;
+    
     squareSize = canvasWidth * squareSizeRatio;
     lineSpeed = canvasWidth * lineSpeedRatio;
     leaveSpeed = canvasWidth * leaveSpeedRatio;
-    collisionThreshold = canvasWidth * collisionThresholdRatio;
   }
   
   p.draw = function() {
-    // Actualizar dimensiones por si acaso (por si no se llamó a windowResized)
     if (p.width !== canvasWidth || p.height !== canvasHeight) {
       updateDimensions();
     }
@@ -66,18 +71,23 @@ const sketchIdentidad = (p) => {
     p.rotate(ROTATION_ANGLE);
     p.translate(-p.width / 2, -p.height / 2);
     
-
-    // línea
+    // 1. Línea original (arriba)
     p.stroke(colorLine);
     p.strokeWeight(p.width / 200);
-    p.line(-p.width * 0.25, lineY, p.width * 1.25, lineY);
+    p.line(-p.width * 0.5, lineY, p.width * 1.5, lineY);
+    
+    // 2. Línea divisoria (centro, punteada)
+    p.strokeWeight(1.5);
+    p.drawingContext.setLineDash([8, 8]); // Estilo punteado
+    p.line(-p.width * 0.5, dividerY, p.width * 1.5, dividerY);
+    p.drawingContext.setLineDash([]); // Reseteamos para que no afecte lo demás
+    
+    // 3. Nueva línea de identidad (abajo, roja)
+    p.stroke(colorIdentidad);
+    p.strokeWeight(p.width / 200);
+    p.line(-p.width * 0.5, newLineY, p.width * 1.5, newLineY);
     
     drawShapes();
-    p.push();
-    p.noStroke();
-    p.fill(bgColor);
-    p.rect(0, 0, p.width, p.height/2.2);
-    p.pop();
     ShapesWithIdentityMovement();
     
     if (dragging) {
@@ -102,7 +112,6 @@ const sketchIdentidad = (p) => {
     
     if (!shapeVisible && currentTime - startTime >= spawnDelay) {
       shapeVisible = true;
-      //addNewLineShape();
       lastSpawnTime = currentTime;
     }
     
@@ -116,7 +125,7 @@ const sketchIdentidad = (p) => {
     
     for (let i = lineShapes.length - 1; i >= 0; i--) {
       let shape = lineShapes[i];
-      shape.x += lineSpeed;
+      shape.x += lineSpeed; // Avanzan hacia adelante
       
       if (shape.x - shape.size / 2 > p.width * 1.5) {
         lineShapes.splice(i, 1);
@@ -133,7 +142,8 @@ const sketchIdentidad = (p) => {
       y: lineY,
       size: squareSize,
       kind: 'square',
-      color: colorLine
+      color: colorLine,
+      transformed: false
     });
   }
   
@@ -141,8 +151,9 @@ const sketchIdentidad = (p) => {
     for (let i = freeShapes.length - 1; i >= 0; i--) {
       let shape = freeShapes[i];
       
-      if (shape.state === 'leaving') {
-        shape.x -= leaveSpeed;
+      if (shape.state === 'leaving_backwards') {
+        shape.x -= leaveSpeed; // Se mueven a contracorriente
+        // Si salen por completo de la pantalla por el lado izquierdo, se borran
         if (shape.x + shape.size < -p.width * 0.5) {
           freeShapes.splice(i, 1);
           continue;
@@ -190,20 +201,12 @@ const sketchIdentidad = (p) => {
     
     let local = toLocalCoords(p.mouseX, p.mouseY);
     
+    // Solo permitimos agarrar figuras de la línea superior
     for (let i = lineShapes.length - 1; i >= 0; i--) {
       if (isOverShape(local.x, local.y, lineShapes[i])) {
         dragging = lineShapes[i];
         dragging.fromLine = true;
         lineShapes.splice(i, 1);
-        return;
-      }
-    }
-    
-    for (let i = freeShapes.length - 1; i >= 0; i--) {
-      if (freeShapes[i].state === 'still' && isOverShape(local.x, local.y, freeShapes[i])) {
-        dragging = freeShapes[i];
-        dragging.fromLine = false;
-        freeShapes.splice(i, 1);
         return;
       }
     }
@@ -214,48 +217,41 @@ const sketchIdentidad = (p) => {
       let local = toLocalCoords(p.mouseX, p.mouseY);
       dragging.x = local.x;
       dragging.y = local.y;
+      
+      // Feedback en tiempo real: Si cruza la frontera, se transforma
+      if (dragging.fromLine && dragging.y > dividerY && !dragging.transformed) {
+        dragging.kind = randomKind();
+        dragging.color = colorIdentidad;
+        dragging.transformed = true;
+      } 
+      // Si se arrepiente y vuelve arriba antes de soltar, vuelve a ser cuadrado
+      else if (dragging.fromLine && dragging.y <= dividerY && dragging.transformed) {
+        dragging.kind = 'square';
+        dragging.color = colorLine;
+        dragging.transformed = false;
+      }
     }
   }
   
   p.mouseReleased = function() {
     if (!dragging) return;
     
-    const droppedOnLine = Math.abs(dragging.y - lineY) < dragging.size;
-    
-    if (droppedOnLine) {
+    // Si la soltamos en la zona inferior (más allá del límite)
+    if (dragging.y > dividerY) {
+      dragging.y = newLineY; // Se acopla al nuevo camino
+      dragging.state = 'leaving_backwards';
+      delete dragging.fromLine;
+      freeShapes.push(dragging);
+    } 
+    // Si la soltamos en la zona superior (no cruzó o se arrepintió)
+    else {
       dragging.kind = 'square';
-      dragging.size = squareSize;
       dragging.color = colorLine;
       dragging.y = lineY;
+      dragging.transformed = false;
       delete dragging.state;
       delete dragging.fromLine;
       lineShapes.push(dragging);
-    } else {
-      dragging.kind = dragging.fromLine ? randomKind() : dragging.kind;
-      dragging.size = squareSize;
-      dragging.color = colorIdentidad;
-      delete dragging.fromLine;
-      
-      let colisiones = [];
-      for (let i = freeShapes.length - 1; i >= 0; i--) {
-        let s = freeShapes[i];
-        if (s.state === 'still' && p.dist(dragging.x, dragging.y, s.x, s.y) < collisionThreshold) {
-          colisiones.push(s);
-          freeShapes.splice(i, 1);
-        }
-      }
-      
-      if (colisiones.length > 0) {
-        dragging.state = 'leaving';
-        freeShapes.push(dragging);
-        colisiones.forEach(s => {
-          s.state = 'leaving';
-          freeShapes.push(s);
-        });
-      } else {
-        dragging.state = 'still';
-        freeShapes.push(dragging);
-      }
     }
     
     dragging = null;
