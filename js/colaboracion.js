@@ -25,7 +25,7 @@ const sketchColaboracion = (p) => {
 
   function setupLine() {
     lineBottom = { x: 0, y: p.height };
-    lineTop = { x: p.width, y: p.height/20 };
+    lineTop = { x: p.width, y: 0};
     
     const dx = lineTop.x - lineBottom.x;
     const dy = lineTop.y - lineBottom.y;
