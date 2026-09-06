@@ -156,6 +156,7 @@ const Herencia = (p) => {
       shrinkT: 0 // progreso de la animacion de achicado al soltarse en C
     };
   }
+
  
   function ParentShapesActions() {
     if (parentA) { updatePlacedShrink(parentA); drawShape(parentA); }
