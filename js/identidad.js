@@ -76,12 +76,12 @@ const sketchIdentidad = (p) => {
     p.push();
     p.noStroke();
     p.fill(bgColor);
-    p.rect(0, 0, p.width, p.height/2);
+    p.rect(0, 0, p.width, p.height/2.2);
     p.pop();
     ShapesWithIdentityMovement();
     
     if (dragging) {
-      drawShape(dragging);
+      drawRandomShape(dragging);
     }
     
     p.pop();
@@ -102,7 +102,7 @@ const sketchIdentidad = (p) => {
     
     if (!shapeVisible && currentTime - startTime >= spawnDelay) {
       shapeVisible = true;
-      addNewLineShape();
+      //addNewLineShape();
       lastSpawnTime = currentTime;
     }
     
@@ -122,7 +122,7 @@ const sketchIdentidad = (p) => {
         lineShapes.splice(i, 1);
         continue;
       }
-      drawShape(shape);
+      drawRandomShape(shape);
     }
   }
   
@@ -148,11 +148,11 @@ const sketchIdentidad = (p) => {
           continue;
         }
       }
-      drawShape(shape);
+      drawRandomShape(shape);
     }
   }
   
-  function drawShape(shape) {
+  function drawRandomShape(shape) {
     p.push();
     p.noStroke();
     p.fill(shape.color);
