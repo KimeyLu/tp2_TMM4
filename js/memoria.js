@@ -1,11 +1,11 @@
 const Memoria = (p) => {
- 
+
     // ---------- variables necesarias ----------
     let lineY;
     let shapes = [];       // formas que recorren la linea
     let memories = [];     // clones guardados al costado de la linea
     let fadingOut = [];     // clones desvaneciendose al reiniciar la memoria
- 
+
     const COLORS = ['#F0D583', '#121212'];
     const TYPES = ['triangle', 'rect', 'circle'];
     const N_SHAPES = 10;
@@ -13,59 +13,60 @@ const Memoria = (p) => {
     let WRAP_LEN; // distancia total del ciclo (igual para todas, evita desfasajes)
     const ROTATION_ANGLE = p.radians(-43); // rotacion del canvas, ajustable
 
-    // ---------- escala de tamaño (más grande al expandirse a pantalla completa) ----------
-    const BASE_SHAPE_SIZE = 24;
-    const BASE_CURSOR_SIZE = 30;
-    const BASE_MEMORY_START_X = 120;
-    const BASE_MEMORY_COL_SPACING = 80;
-    const BASE_MEMORY_ROW_SPACING = 22;
-    let SIZE_SCALE = 1;
+    // ---------- escala de tamaño, ahora como fraccion de ancho/alto ----------
+    // (antes eran valores fijos pensados para un canvas de 400x400;
+    // se guardan aca las mismas proporciones pero calculadas en vivo)
+    const SHAPE_SIZE_RATIO = 0.06;          // antes: 24 / 400
+    const CURSOR_SIZE_RATIO = 0.075;        // antes: 30 / 400
+    const MEMORY_START_X_RATIO = 0.3;       // antes: 120 / 400
+    const MEMORY_COL_SPACING_RATIO = 0.2;   // antes: 80 / 400
+    const MEMORY_ROW_SPACING_RATIO = 0.055; // antes: 22 / 400
+    const LINE_MARGIN_RATIO = 0.25;         // antes: 100 / 400
+    const WRAP_BUFFER_RATIO = 0.45;         // antes: 180 / 400
+    const HIT_MARGIN_RATIO = 0.01;          // antes: 4 / 400
 
-    function computeSizeScale() {
-        const ratio = Math.min(p.width, p.height) / 400;
-        return ratio <= 1 ? ratio : ratio * 1.25;
-    }
- 
+    let SHAPE_SIZE, CURSOR_BASE_SIZE, MEMORY_START_X, MEMORY_COL_SPACING,
+        MEMORY_ROW_SPACING, LINE_MARGIN, HIT_MARGIN;
+
     // cursor
     let cursorSize;
-    let CURSOR_BASE_SIZE;
     let cursorColor = '#F0D583';
     let hitTimer = 0;
     const HIT_DURATION = 18; // frames que dura la animacion de "achique"
- 
+
     // memoria: 3 columnas, 4 formas por columna
     const MEMORY_COLS = 3;
     const MEMORY_ROWS = 4;
     const MEMORY_CAPACITY = MEMORY_COLS * MEMORY_ROWS;
-    let MEMORY_START_X;
     let MEMORY_START_Y; // depende de p.height, se asigna en setup
-    let MEMORY_COL_SPACING;
-    let MEMORY_ROW_SPACING;
     const SLIDE_EASE = 0.2; // suaviza la aparicion de cada clon en su lugar
     const RESET_FADE_DURATION = 30; // frames que tardan en desvanecerse al reiniciar
 
     function computeSizes() {
-        SIZE_SCALE = computeSizeScale();
-        CURSOR_BASE_SIZE = BASE_CURSOR_SIZE * SIZE_SCALE;
-        MEMORY_START_X = BASE_MEMORY_START_X * SIZE_SCALE;
-        MEMORY_COL_SPACING = BASE_MEMORY_COL_SPACING * SIZE_SCALE;
-        MEMORY_ROW_SPACING = BASE_MEMORY_ROW_SPACING * SIZE_SCALE;
+        const minSide = Math.min(p.width, p.height);
+        SHAPE_SIZE = minSide * SHAPE_SIZE_RATIO;
+        CURSOR_BASE_SIZE = minSide * CURSOR_SIZE_RATIO;
+        MEMORY_START_X = p.width * MEMORY_START_X_RATIO;
+        MEMORY_COL_SPACING = p.width * MEMORY_COL_SPACING_RATIO;
+        MEMORY_ROW_SPACING = p.height * MEMORY_ROW_SPACING_RATIO;
+        LINE_MARGIN = p.width * LINE_MARGIN_RATIO;
+        HIT_MARGIN = minSide * HIT_MARGIN_RATIO;
     }
- 
+
     p.setup = function() {
-        p.createCanvas(400, 400);
+        p.createCanvas(400, 400); // tamaño inicial: no hay width/height previos para basarse en ellos
         computeSizes();
         lineY = p.height / 2;
-        WRAP_LEN = p.width + 180; // buffer fijo, mayor al tamanio maximo de una forma
+        WRAP_LEN = p.width + p.width * WRAP_BUFFER_RATIO;
         MEMORY_START_Y = p.height / 4;
- 
+
         for (let i = 0; i < N_SHAPES; i++) {
             shapes.push(makeShape(i * (WRAP_LEN / N_SHAPES)));
         }
     }
 
     p.windowResized = function() {
-        const oldScale = SIZE_SCALE;
+        const oldShapeSize = SHAPE_SIZE;
         const oldWrap = WRAP_LEN;
 
         const { w, h } = window.getCanvasTargetSize('memoria', 400, 400);
@@ -73,10 +74,10 @@ const Memoria = (p) => {
 
         computeSizes();
         lineY = p.height / 2;
-        WRAP_LEN = p.width + 180;
+        WRAP_LEN = p.width + p.width * WRAP_BUFFER_RATIO;
         MEMORY_START_Y = p.height / 4;
 
-        const sizeRatio = SIZE_SCALE / oldScale;
+        const sizeRatio = SHAPE_SIZE / oldShapeSize;
         const wrapRatio = WRAP_LEN / oldWrap;
 
         for (const s of shapes) {
@@ -86,29 +87,29 @@ const Memoria = (p) => {
         for (const m of memories) m.size *= sizeRatio;
         for (const f of fadingOut) f.size *= sizeRatio;
     }
- 
+
     p.draw = function() {
         p.background('#970510');
- 
+
         // todo lo que se dibuja aca adentro queda afectado por la rotacion
         p.push();
         p.translate(p.width / 2, p.height / 2);
         p.rotate(ROTATION_ANGLE);
         p.translate(-p.width / 2, -p.height / 2);
- 
+
         p.stroke('#F0D583');
-        p.strokeWeight(2);
-        p.line(-100, lineY, p.width + 100, lineY);
- 
+        p.strokeWeight(p.width / 200);
+        p.line(-LINE_MARGIN, lineY, p.width + LINE_MARGIN, lineY);
+
         DrawShapes();
         ShapeMemory();
- 
+
         p.pop();
- 
+
         // el cursor queda fuera de la rotacion para seguir al puntero real
         CursorInteraction();
     }
- 
+
     function toLocalCoords(x, y) {
         // convierte una coordenada de pantalla (ej: el mouse) al sistema
         // "sin rotar" en el que estan definidas las formas, invirtiendo
@@ -121,18 +122,18 @@ const Memoria = (p) => {
             y: dx * sinA + dy * cosA + cy
         };
     }
- 
+
     function makeShape(offset) {
         return {
             offset: offset, // posicion de referencia dentro del ciclo, fija
             lastCycle: 0,
             clicked: false, // evita generar mas de un clon por ciclo
-            size: BASE_SHAPE_SIZE * SIZE_SCALE,
+            size: SHAPE_SIZE,
             type: p.random(TYPES),
             color: p.random(COLORS)
         };
     }
- 
+
     function drawShapeAt(x, y, size, type, color, alpha = 255) {
         p.push();
         p.noStroke();
@@ -149,7 +150,7 @@ const Memoria = (p) => {
         }
         p.pop();
     }
- 
+
     function DrawShapes() {
         // se crean formas de tipos y colores aleatorios, avanzan por la linea
         // y al salir del canvas reaparecen al inicio, siempre a la misma distancia
@@ -158,8 +159,8 @@ const Memoria = (p) => {
         for (let s of shapes) {
             let cyclePos = (s.offset + travel) % WRAP_LEN;
             let cycleCount = Math.floor((s.offset + travel) / WRAP_LEN);
-            s.x = cyclePos - 100; // posicion en que inician las formas, aparecen, principio
- 
+            s.x = cyclePos - LINE_MARGIN; // posicion en que inician las formas, aparecen, principio
+
             // al arrancar un nuevo ciclo, se reasignan tipo y color
             // y se habilita de nuevo la posibilidad de generar un clon
             if (cycleCount !== s.lastCycle) {
@@ -168,15 +169,15 @@ const Memoria = (p) => {
                 s.color = p.random(COLORS);
                 s.clicked = false;
             }
- 
+
             drawShapeAt(s.x, lineY, s.size, s.type, s.color);
         }
     }
- 
+
     function CursorInteraction() {
         // el cursor solo aparece mientras se presiona el mouse
         if (!p.mouseIsPressed) return;
- 
+
         if (hitTimer > 0) {
             // animacion de achique + cambio de color al tocar una forma
             let t = hitTimer / HIT_DURATION; // 1 -> 0
@@ -188,7 +189,7 @@ const Memoria = (p) => {
             cursorSize = CURSOR_BASE_SIZE;
             cursorColor = '#F0D583';
         }
- 
+
         p.push();
         p.noFill();
         p.stroke(cursorColor);
@@ -196,13 +197,13 @@ const Memoria = (p) => {
         p.circle(p.mouseX, p.mouseY, cursorSize);
         p.pop();
     }
- 
+
     function slotPos(i) {
         let col = Math.floor(i / MEMORY_ROWS);
         let row = i % MEMORY_ROWS;
         return { x: MEMORY_START_X + col * MEMORY_COL_SPACING, y: MEMORY_START_Y + row * MEMORY_ROW_SPACING };
     }
- 
+
     function ShapeMemory() {
         // clones guardados: 3 columnas, 4 formas por columna, con
         // reacomodo suave hacia su lugar (misma logica grafica del sketch)
@@ -213,7 +214,7 @@ const Memoria = (p) => {
             m.dispY = p.lerp(m.dispY, target.y, SLIDE_EASE);
             drawShapeAt(m.dispX, m.dispY, m.size, m.type, m.color);
         }
- 
+
         // clones del reset anterior: se quedan quietos en su lugar
         // y se van desvaneciendo hasta desaparecer
         for (let i = fadingOut.length - 1; i >= 0; i--) {
@@ -226,24 +227,24 @@ const Memoria = (p) => {
             }
         }
     }
- 
+
     function hitTest(shape, mx, my) {
         let d = p.dist(mx, my, shape.x, lineY);
-        return d < shape.size / 2 + 4; // un poco de margen para que sea facil clickear
+        return d < shape.size / 2 + HIT_MARGIN; // un poco de margen para que sea facil clickear
     }
-            function mouseInsideCanvas() {
-    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
-}
+    function mouseInsideCanvas() {
+        return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+    }
 
-  p.mousePressed = () => {
-    if (!mouseInsideCanvas()) return;
-  let local = toLocalCoords(p.mouseX, p.mouseY);
+    p.mousePressed = () => {
+        if (!mouseInsideCanvas()) return;
+        let local = toLocalCoords(p.mouseX, p.mouseY);
         for (let i = shapes.length - 1; i >= 0; i--) {
             let s = shapes[i];
             if (!s.clicked && hitTest(s, local.x, local.y)) {
                 hitTimer = HIT_DURATION;
                 s.clicked = true; // ya generó su clon, no puede generar otro hasta el proximo ciclo
- 
+
                 // reset: si ya esta llena la memoria, los clones actuales se
                 // desvanecen en su lugar en vez de borrarse de golpe
                 if (memories.length >= MEMORY_CAPACITY) {
@@ -259,7 +260,7 @@ const Memoria = (p) => {
                     }
                     memories = [];
                 }
- 
+
                 let idx = memories.length;
                 let pos = slotPos(idx);
                 memories.push({
@@ -269,12 +270,12 @@ const Memoria = (p) => {
                     dispX: pos.x, // nace ya en su posicion final, sin animacion de entrada
                     dispY: pos.y
                 });
- 
+
                 break; // solo la primera forma tocada
             }
         }
     }
- 
+
 };
- 
+
 new p5(Memoria, 'memoria');
