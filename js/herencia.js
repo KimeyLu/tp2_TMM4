@@ -330,10 +330,13 @@ const Herencia = (p) => {
       speed: 2
     });
   }
- 
-  // ---------- interaccion con el mouse ----------
-  p.mousePressed = function() {
-    const w = screenToWorld(p.mouseX, p.mouseY);
+      function mouseInsideCanvas() {
+    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+}
+
+  p.mousePressed = () => {
+    if (!mouseInsideCanvas()) return;
+const w = screenToWorld(p.mouseX, p.mouseY);
     if (parentA && !parentA.placed && isOver(parentA, w.x, w.y)) {
       draggingShape = parentA;
     } else if (parentB && !parentB.placed && isOver(parentB, w.x, w.y)) {

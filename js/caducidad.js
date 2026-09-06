@@ -36,6 +36,10 @@ const Caducidad = (p) => {
     return ratio <= 1 ? ratio : ratio * 1.25;
   }
 
+  function mouseInsideCanvas() {
+    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+}
+
   function computeSizes() {
     SIZE_SCALE = computeSizeScale();
     shapeSize = BASE_SHAPE_SIZE * SIZE_SCALE;
@@ -263,6 +267,7 @@ const Caducidad = (p) => {
 
   // ---------- interacción con el mouse ----------
   p.mousePressed = function() {
+    if (!mouseInsideCanvas()) return;
     const mouse = getLogicalMouse();
     if (shape && !shape.isSpawning && p.dist(mouse.x, mouse.y, shape.x, shape.y) < shapeSize / 2 + 4) {
       isDragging = true;

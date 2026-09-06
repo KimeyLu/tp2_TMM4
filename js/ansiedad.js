@@ -36,6 +36,9 @@ const sketchAnsiedad = (p) => {
   //   p.resizeCanvas(container.offsetWidth, container.offsetHeight);
   //   recalcGeometry();
   // };
+function mouseInsideCanvas() {
+    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+}
 
   function recalcGeometry() {
     cx = p.width / 2;
@@ -247,6 +250,7 @@ const sketchAnsiedad = (p) => {
   };
 
   p.mousePressed = () => {
+    if (!mouseInsideCanvas()) return;
     if (primaryId === null) primaryId = 'mouse';
     handleTouchDown(p.mouseX, p.mouseY);
   };

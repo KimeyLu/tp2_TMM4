@@ -391,7 +391,12 @@ const sketchEmpatia = (p) => {
     return false;
   };
 
+  function mouseInsideCanvas() {
+    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+}
+
   p.mousePressed = () => {
+    if (!mouseInsideCanvas()) return;
     const pt = findParticleAt(p.mouseX, p.mouseY);
     if (pt) {
       pt.dragging = true;

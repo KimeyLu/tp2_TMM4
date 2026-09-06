@@ -231,9 +231,13 @@ const Memoria = (p) => {
         let d = p.dist(mx, my, shape.x, lineY);
         return d < shape.size / 2 + 4; // un poco de margen para que sea facil clickear
     }
- 
-    p.mousePressed = function() {
-        let local = toLocalCoords(p.mouseX, p.mouseY);
+            function mouseInsideCanvas() {
+    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+}
+
+  p.mousePressed = () => {
+    if (!mouseInsideCanvas()) return;
+  let local = toLocalCoords(p.mouseX, p.mouseY);
         for (let i = shapes.length - 1; i >= 0; i--) {
             let s = shapes[i];
             if (!s.clicked && hitTest(s, local.x, local.y)) {

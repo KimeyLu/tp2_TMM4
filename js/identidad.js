@@ -132,9 +132,12 @@ const sketchIdentidad = (p) => {
     return mx > shape.x - half && mx < shape.x + half &&
            my > shape.y - half && my < shape.y + half;
   }
- 
-  // --- interacción con mouse ---
-  p.mousePressed = function() {
+      function mouseInsideCanvas() {
+    return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
+}
+
+  p.mousePressed = () => {
+    if (!mouseInsideCanvas()) return;
     // primero: ¿estamos agarrando un cuadrado de la línea?
     for (let i = lineShapes.length - 1; i >= 0; i--) {
       if (isOverShape(p.mouseX, p.mouseY, lineShapes[i])) {

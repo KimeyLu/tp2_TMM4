@@ -114,47 +114,8 @@ html, body {
     box-sizing: border-box;
 }
 
-#memoria canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#herencia canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#caducidad canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#colaboracion canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#identidad canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#empatia canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#incertidumbre canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#expectativa canvas {
-    width: auto !important;
-    height: 27vh !important;
-}
-
-#ansiedad canvas {
-    width: auto !important;
-    height: 27vh !important;
+.item:not(.expanded) canvas {
+    width: 27vh !important;
+    height: 27vh !important; /* Fuerza un cuadrado perfecto */
+    object-fit: cover; /* Evita que el contenido interno se deforme */
 }
