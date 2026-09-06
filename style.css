@@ -99,22 +99,13 @@ html, body {
   display: block;
 }
 
-/* IMPORTANTE: nunca usar width/height:auto acá. Un <canvas> sin tamaño CSS
-   explícito toma como tamaño "natural" sus atributos width/height, que en
-   p5.js son el buffer interno de dibujo (tamaño visual x pixelDensity del
-   dispositivo). En un celular con pantalla retina eso es 2-3 veces más
-   grande que el tamaño real en pantalla, así que "auto" hacía que el canvas
-   se dibujara mucho más grande de lo visible -> se veía recortado.
-   En vez de auto, le decimos directamente el tamaño que ocupa: el lado más
-   chico entre ancho y alto de pantalla (mismo criterio que usa
-   getCanvasTargetSize en expandir.js). */
+/* El tamaño real del canvas lo define resizeCanvas() desde JS (usando
+   visualViewport). Acá solo ponemos un límite de seguridad para que nunca
+   se salga de los bordes de .item.expanded, que ahora tiene un tamaño en
+   píxeles exacto (fijado por JS), no una unidad vh que puede desfasarse. */
 .item.expanded canvas {
-  width: min(100vw, 100vh) !important;
-  height: min(100vw, 100vh) !important;
-}
-.item.expanded canvas {
-  width: min(100vw, 100dvh) !important;
-  height: min(100vw, 100dvh) !important;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .titulo {
@@ -191,11 +182,7 @@ html, body {
   .item.expanded canvas {
     align-items: center;
     justify-content: center;
-    width: min(100vw, 100vh) !important;
-    height: min(100vw, 100vh) !important;
-  }
-  .item.expanded canvas {
-    width: min(100vw, 100dvh) !important;
-    height: min(100vw, 100dvh) !important;
+    max-width: 100%;
+    max-height: 100%;
   }
 }

@@ -37,20 +37,45 @@ document.addEventListener('DOMContentLoaded', () => {
   function expandItem(item) {
     document.querySelectorAll('.container').forEach(c => c.classList.add('has-expanded'));
     item.classList.add('expanded');
-    // Esperamos un frame (y un pelín más) para que el navegador termine de
-    // ocultar la barra de direcciones / acomodar el viewport antes de medir.
+
+    // Fijamos el tamaño real en píxeles ya mismo (evita el "salto" visual),
+    // y de nuevo un frame después / 150ms después, por si el navegador
+    // todavía está terminando de acomodar la barra de direcciones.
+    applyViewportSizeTo(item);
     requestAnimationFrame(() => {
+      applyViewportSizeTo(item);
       window.dispatchEvent(new Event('resize'));
-      setTimeout(() => window.dispatchEvent(new Event('resize')), 150);
+      setTimeout(() => {
+        applyViewportSizeTo(item);
+        window.dispatchEvent(new Event('resize'));
+      }, 150);
     });
   }
 
   function collapseItem(item) {
     item.classList.remove('expanded');
+    item.style.width = '';
+    item.style.height = '';
     document.querySelectorAll('.container').forEach(c => c.classList.remove('has-expanded'));
     window.dispatchEvent(new Event('resize'));
   }
 });
+
+// Fuerza el tamaño del contenedor expandido con píxeles reales, en vez de
+// depender de 100vh/100dvh en CSS. Esto es lo que soluciona el recorte:
+// muchos navegadores mobile reportan un 100vh más alto que lo que en
+// realidad se ve en pantalla (porque cuentan el espacio detrás de la barra
+// de direcciones), y como el contenedor está en position:fixed, esa
+// diferencia hace que una parte del canvas quede fuera del área visible
+// y sea inalcanzable (no hay scroll dentro de un position:fixed).
+// Usando el tamaño real de window.visualViewport evitamos ese desfasaje.
+function applyViewportSizeTo(item) {
+  const vv = window.visualViewport;
+  const w = vv ? vv.width : window.innerWidth;
+  const h = vv ? vv.height : window.innerHeight;
+  item.style.width = w + 'px';
+  item.style.height = h + 'px';
+}
 
 // Función que cada sketch de p5 va a usar para saber qué tamaño de canvas
 // le corresponde: pantalla completa si está expandido, o su tamaño normal.
@@ -58,8 +83,6 @@ window.getCanvasTargetSize = function (containerId, fallbackW, fallbackH) {
   const el = document.getElementById(containerId);
   const item = el && el.closest('.item');
   if (item && item.classList.contains('expanded')) {
-    // visualViewport da el tamaño real visible en mobile (sin contar la
-    // barra de direcciones/teclado), que innerWidth/innerHeight no siempre reflejan.
     const vv = window.visualViewport;
     const w = vv ? vv.width : window.innerWidth;
     const h = vv ? vv.height : window.innerHeight;
@@ -73,7 +96,9 @@ window.getCanvasTargetSize = function (containerId, fallbackW, fallbackH) {
 // visualViewport que no siempre generan un 'resize' normal de window.
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', () => {
-    if (document.querySelector('.item.expanded')) {
+    const expanded = document.querySelector('.item.expanded');
+    if (expanded) {
+      applyViewportSizeTo(expanded);
       window.dispatchEvent(new Event('resize'));
     }
   });
