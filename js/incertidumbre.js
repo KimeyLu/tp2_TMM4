@@ -1,391 +1,583 @@
-/* ============================================================
-   INCERTIDUMBRE
-   ============================================================ */
+/*
+  Experiencia "incertidumbre"
+  ---------------------------
+  Siempre 4 obstáculos con fases dinámicas:
+    - "silent": Sin titileo, se lanza súbitamente al acercarte.
+    - "diagonal": Lento y esquivable. 30% de prob. de invertirse y salir del otro lado.
+    - "rebound": Rebota de 1 a 3 veces (35%, 35%, 22%) o 4 veces (8% prob. mínima).
+    - "invisible": 30% de prob. de duplicarse y rebotar formando 2 ataques en "X" con hueco central.
+
+  SISTEMA DE REPETICIÓN:
+    - 80% de las veces: Los 4 obstáculos son 100% distintos (sin repeticiones).
+    - 20% de las veces: Se permite baja probabilidad de repetición (parejas).
+*/
 
 const sketchIncertidumbre = (p) => {
-  const COLOR_BG = '#141414';
-  const COLOR_RED = '#970511';
-  const COLOR_CREAM = '#EFD583';
+  const BG = '#141414';
+  const RED = '#970511';
+  const CREAM = '#EFD583';
 
-  const IDLE_SPEED = 0.02;
-  const IDLE_AMP = 4;
+  const ROTATION_DEG = -43;
 
-  const FOLLOW_EASE = 0.28;   // qué tan rápido el círculo sigue al dedo/mouse mientras se arrastra
-  const RETRACT_EASE = 0.18;  // qué tan rápido vuelve a su anclaje al soltar
-  const CONNECT_FACTOR = 0.22; // qué tan cerca (relativo al tamaño del canvas) hay que arrastrar de OTRO cuadrado para transferirse
+  // Escala dinámica según pantalla
+  const BASE_CIRCLE_R = 12;
+  let circleR = BASE_CIRCLE_R;
+  let SIZE_SCALE = 1;
 
-  const GATE_CLOSE_MS = 140;
-  const GATE_HOLD_MS = 260;
-  const GATE_REOPEN_MS = 320;
-  const GATE_CLOSE_OVERSHOOT = 2.05; // qué tanto más allá del centro exacto llega la punta al cerrarse (asegura que realmente atrape)
-  const GATE_MIN_INTERVAL = 1800;
-  const GATE_MAX_INTERVAL = 3600;
-  const GATE_DANGER_FROM = 0.55; // a partir de qué tan "cerrada" (0-1) ya puede romper al círculo
+  // Geometría del recorrido
+  let lineY;
+  let limitStart = 0;
+  let limitEnd = 0;
+  let wallLength = 60;
+  let wallGap = 0;
 
-  const DEATH_MS = 420;
+  // Estado del círculo
+  let circleX = 0;
+  let circleY = 0;
+  let isDragging = false;
 
-  let size; // min(width, height): referencia de escala para todo
-  let squares = []; // los dos cuadrados rojos (bases)
-  let gates = [];    // las dos barras crema
-  let player;
-  let dragging = false;
-  let activePointer = null; // 'mouse' o el id de un touch
-  let pointerPos = { x: 0, y: 0 };
-  let nextGateEventTimer = 0;
+  // Velocidad dinámica del círculo (cambios en seco)
+  let currentMaxStep = 0.7;
+  let zoneSpeeds = [];
+
+  // --- Configuración de los obstáculos ---
+  const OBSTACLE_COUNT = 4;
+  const TRIANGLE_SIZE = 25;
+  const OFFSET_FACTOR = 3.0;
+
+  const LAUNCH_MS_NORMAL = 230;
+  const LAUNCH_MS_DIAGONAL = 1400; // Muy lento para esquivar con facilidad
+
+  let obstacles = [];
+
+  function computeSizes() {
+    const ratio = Math.min(p.width, p.height) / 400;
+    SIZE_SCALE = ratio <= 1 ? ratio : ratio * 1.25;
+    circleR = BASE_CIRCLE_R * SIZE_SCALE;
+
+    lineY = p.height / 2;
+    limitStart = p.width * 0.15;
+    limitEnd = p.width * 0.85;
+
+    wallLength = 70 * SIZE_SCALE;
+    wallGap = 18 * SIZE_SCALE;
+  }
+
+  function getTargetSize(id, defW, defH) {
+    if (typeof window !== 'undefined' && typeof window.getCanvasTargetSize === 'function') {
+      return window.getCanvasTargetSize(id, defW, defH);
+    }
+    const el = document.getElementById(id);
+    if (el && el.clientWidth && el.clientHeight) {
+      return { w: el.clientWidth, h: el.clientHeight };
+    }
+    return { w: defW, h: defH };
+  }
 
   p.setup = () => {
     p.createCanvas(400, 400);
-    buildScene(false);
+    computeSizes();
+    circleX = limitStart;
+    circleY = lineY;
+    generateRun();
+    p.windowResized();
   };
 
   p.windowResized = () => {
-    const { w, h } = window.getCanvasTargetSize('incertidumbre', 400, 400);
+    const { w, h } = getTargetSize('incertidumbre', 400, 400);
     p.resizeCanvas(w, h);
-    buildScene(true);
+
+    const oldLimitStart = limitStart;
+    const oldLimitEnd = limitEnd;
+
+    computeSizes();
+
+    const progress = (circleX - oldLimitStart) / ((oldLimitEnd - oldLimitStart) || 1);
+    circleX = p.lerp(limitStart, limitEnd, progress);
+    circleY = lineY;
   };
 
-  function buildScene(keepPlayer) {
-    size = Math.min(p.width, p.height);
-    const centerX = p.width / 2;
-    const centerY = p.height / 2;
+  // --- SELECCIÓN CONTROLADA DE FASES ---
+  function pickRunTypes() {
+    const availableTypes = ['silent', 'diagonal', 'rebound', 'invisible'];
+    
+    // Probabilidad general baja de permitir cualquier repetición (20%)
+    // El 80% restante garantiza 4 fases completamente distintas
+    const REPEAT_PROB = 0.20;
+    const allowRepeat = Math.random() < REPEAT_PROB;
 
-    // dos cuadrados en la diagonal "/" (arriba-derecha y abajo-izquierda),
-    // a un margen simétrico (0.25/0.75) respecto al centro.
-    squares = [
-      makeSquare(p.width * 0.75, p.height * 0.25, size * 0.30, p.radians(45)),
-      makeSquare(p.width * 0.25, p.height * 0.75, size * 0.30, p.radians(45))
-    ];
-
-    // dos barras en la diagonal "\" (arriba-izquierda y abajo-derecha), mismo
-    // margen simétrico. Cada una apunta exactamente hacia el centro de la
-    // pantalla (así queda bien alineada sea cual sea el aspecto del canvas,
-    // cuadrado o pantalla completa) y su longitud "cerrada" llega justo hasta
-    // el centro: entre las dos, cuando les toca cerrarse, sí pueden atrapar
-    // al jugador en el camino entre los cuadrados.
-    gates = [
-      makeGate(p.width * 0.25, p.height * 0.25, size * 0.34, size * 0.11, centerX, centerY),
-      makeGate(p.width * 0.75, p.height * 0.75, size * 0.34, size * 0.11, centerX, centerY)
-    ];
-
-    if (!keepPlayer || !player) {
-      player = makePlayer(0, 0);
+    if (!allowRepeat) {
+      // 80%: 4 fases únicas barajadas
+      const shuffled = [...availableTypes];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
     } else {
-      // reubica al jugador en el mismo cuadrado/borde que tenía, con la nueva geometría
-      const edges = squareEdges(squares[player.squareIndex]);
-      const anchor = midpoint(edges[player.edgeIndex].a, edges[player.edgeIndex].b);
-      player.anchor = anchor;
-      player.pos = { x: anchor.x, y: anchor.y };
-    }
+      // 20%: Sorteo con repetición controlada (parejas, y 3 iguales casi nulo)
+      while (true) {
+        const picked = [];
+        const counts = {};
 
-    scheduleNextGateEvent();
-  }
+        for (let i = 0; i < OBSTACLE_COUNT; i++) {
+          const t = p.random(availableTypes);
+          picked.push(t);
+          counts[t] = (counts[t] || 0) + 1;
+        }
 
-  // ---------- geometría de los cuadrados ----------
-  function makeSquare(cx, cy, side, rot) {
-    return { cx, cy, side, rot, phase: p.random(1000) };
-  }
+        const maxRepetitions = Math.max(...Object.values(counts));
 
-  function rotatePoint(pt, rot, cx, cy) {
-    const cosA = Math.cos(rot), sinA = Math.sin(rot);
-    return {
-      x: cx + pt.x * cosA - pt.y * sinA,
-      y: cy + pt.x * sinA + pt.y * cosA
-    };
-  }
+        // Parejas normales aceptadas en este 20%
+        if (maxRepetitions === 2) {
+          return picked;
+        }
 
-  function squareEdges(sq) {
-    const h = sq.side / 2;
-    const local = [
-      { x: -h, y: -h }, { x: h, y: -h }, { x: h, y: h }, { x: -h, y: h }
-    ];
-    const corners = local.map(pt => rotatePoint(pt, sq.rot, sq.cx, sq.cy));
-    const edges = [];
-    for (let i = 0; i < 4; i++) {
-      edges.push({ a: corners[i], b: corners[(i + 1) % 4] });
-    }
-    return edges;
-  }
-
-  function midpoint(a, b) {
-    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  }
-
-  function closestPointOnSegment(pt, a, b) {
-    const abx = b.x - a.x, aby = b.y - a.y;
-    const apx = pt.x - a.x, apy = pt.y - a.y;
-    const lenSq = abx * abx + aby * aby;
-    let t = lenSq === 0 ? 0 : (apx * abx + apy * aby) / lenSq;
-    t = Math.max(0, Math.min(1, t));
-    const cx = a.x + abx * t, cy = a.y + aby * t;
-    const dx = pt.x - cx, dy = pt.y - cy;
-    return { point: { x: cx, y: cy }, dist: Math.sqrt(dx * dx + dy * dy) };
-  }
-
-  // ---------- jugador ----------
-  function makePlayer(squareIndex, edgeIndex) {
-    const edges = squareEdges(squares[squareIndex]);
-    const anchor = midpoint(edges[edgeIndex].a, edges[edgeIndex].b);
-    return {
-      squareIndex,
-      edgeIndex,
-      anchor: { x: anchor.x, y: anchor.y },
-      pos: { x: anchor.x, y: anchor.y },
-      r: size * 0.028,
-      state: 'alive', // 'alive' | 'dead'
-      deathTimer: 0
-    };
-  }
-
-  function clampToCanvas(x, y) {
-    return {
-      x: p.constrain(x, player.r, p.width - player.r),
-      y: p.constrain(y, player.r, p.height - player.r)
-    };
-  }
-
-  function tryTransfer() {
-    let bestDist = Infinity, best = null;
-    for (let si = 0; si < squares.length; si++) {
-      const edges = squareEdges(squares[si]);
-      for (let ei = 0; ei < edges.length; ei++) {
-        if (si === player.squareIndex && ei === player.edgeIndex) continue;
-        const { point, dist } = closestPointOnSegment(player.pos, edges[ei].a, edges[ei].b);
-        if (dist < bestDist) { bestDist = dist; best = { si, ei, point }; }
-      }
-    }
-
-    const CONNECT_THRESH = size * CONNECT_FACTOR;
-    if (best && bestDist < CONNECT_THRESH) {
-      player.squareIndex = best.si;
-      player.edgeIndex = best.ei;
-      player.anchor = best.point;
-    } else {
-      const edges = squareEdges(squares[player.squareIndex]);
-      const e = edges[player.edgeIndex];
-      const { point } = closestPointOnSegment(player.pos, e.a, e.b);
-      player.anchor = point;
-    }
-  }
-
-  function killPlayer() {
-    player.state = 'dead';
-    player.deathTimer = DEATH_MS;
-    dragging = false;
-    activePointer = null;
-  }
-
-  function revivePlayer() {
-    const edges = squareEdges(squares[player.squareIndex]);
-    const anchor = midpoint(edges[player.edgeIndex].a, edges[player.edgeIndex].b);
-    player.anchor = anchor;
-    player.pos = { x: anchor.x, y: anchor.y };
-    player.state = 'alive';
-  }
-
-  function updatePlayer() {
-    if (player.state === 'dead') {
-      player.deathTimer -= p.deltaTime;
-      if (player.deathTimer <= 0) revivePlayer();
-      return;
-    }
-
-    if (dragging) {
-      const target = clampToCanvas(pointerPos.x, pointerPos.y);
-      player.pos.x = p.lerp(player.pos.x, target.x, FOLLOW_EASE);
-      player.pos.y = p.lerp(player.pos.y, target.y, FOLLOW_EASE);
-      tryTransfer();
-    } else {
-      player.pos.x = p.lerp(player.pos.x, player.anchor.x, RETRACT_EASE);
-      player.pos.y = p.lerp(player.pos.y, player.anchor.y, RETRACT_EASE);
-    }
-
-    checkGateCollision();
-  }
-
-  function drawPlayer() {
-    if (player.state === 'dead') return;
-
-    p.stroke(COLOR_RED);
-    p.strokeWeight(2);
-    p.line(player.anchor.x, player.anchor.y, player.pos.x, player.pos.y);
-
-    p.noStroke();
-    p.fill(COLOR_RED);
-    p.circle(player.pos.x, player.pos.y, player.r * 2);
-  }
-
-  // ---------- cuadrados (dibujo) ----------
-  function drawSquares() {
-    p.noFill();
-    p.stroke(COLOR_RED);
-    p.strokeWeight(3);
-    for (const sq of squares) {
-      const idleX = Math.sin(p.frameCount * IDLE_SPEED + sq.phase) * (IDLE_AMP * 0.6);
-      const idleY = Math.cos(p.frameCount * IDLE_SPEED * 0.9 + sq.phase) * (IDLE_AMP * 0.6);
-      p.push();
-      p.translate(sq.cx + idleX, sq.cy + idleY);
-      p.rotate(sq.rot);
-      p.rectMode(p.CENTER);
-      p.rect(0, 0, sq.side, sq.side);
-      p.pop();
-    }
-  }
-
-  // ---------- compuertas (crema) ----------
-  // baseLength: tamaño "idle" (en reposo). closedLength: longitud cuando está
-  // totalmente cerrada, calculada para que su punta llegue justo al centro
-  // de la pantalla (más un pequeño extra, GATE_CLOSE_OVERSHOOT).
-  function makeGate(cx, cy, baseLength, width, targetX, targetY) {
-    const rot = Math.atan2(targetY - cy, targetX - cx);
-    const distToTarget = Math.hypot(targetX - cx, targetY - cy);
-    const closedLength = distToTarget * 2 * GATE_CLOSE_OVERSHOOT / 2; // = distToTarget * GATE_CLOSE_OVERSHOOT
-    return {
-      cx, cy, rot, width, baseLength, closedLength,
-      phase: p.random(1000),
-      state: 'idle', timer: 0, extend: 0
-    };
-  }
-
-  function currentGateLength(g) {
-    return p.lerp(g.baseLength, g.closedLength, g.extend);
-  }
-
-  function easeOutQuad(t) { return 1 - (1 - t) * (1 - t); }
-
-  function scheduleNextGateEvent() {
-    nextGateEventTimer = p.random(GATE_MIN_INTERVAL, GATE_MAX_INTERVAL);
-  }
-
-  function updateGates() {
-    nextGateEventTimer -= p.deltaTime;
-    if (nextGateEventTimer <= 0) {
-      const idleGates = gates.filter(g => g.state === 'idle');
-      if (idleGates.length > 0) {
-        const g = p.random(idleGates);
-        g.state = 'closing';
-        g.timer = 0;
-      }
-      scheduleNextGateEvent();
-    }
-
-    for (const g of gates) {
-      if (g.state === 'idle') continue;
-      g.timer += p.deltaTime;
-
-      if (g.state === 'closing') {
-        const t = p.constrain(g.timer / GATE_CLOSE_MS, 0, 1);
-        g.extend = easeOutQuad(t);
-        if (t >= 1) { g.state = 'held'; g.timer = 0; }
-      } else if (g.state === 'held') {
-        g.extend = 1;
-        if (g.timer >= GATE_HOLD_MS) { g.state = 'reopening'; g.timer = 0; }
-      } else if (g.state === 'reopening') {
-        const t = p.constrain(g.timer / GATE_REOPEN_MS, 0, 1);
-        g.extend = 1 - easeOutQuad(t);
-        if (t >= 1) { g.state = 'idle'; g.timer = 0; g.extend = 0; }
+        // Si salieran 3 iguales, probabilidad ínfima (5% dentro del 20% = 1% real)
+        if (maxRepetitions === 3 && Math.random() < 0.05) {
+          return picked;
+        }
       }
     }
   }
 
-  function drawGates() {
-    p.noStroke();
-    p.fill(COLOR_CREAM);
-    for (const g of gates) {
-      const idleX = Math.sin(p.frameCount * IDLE_SPEED + g.phase) * IDLE_AMP;
-      const idleY = Math.cos(p.frameCount * IDLE_SPEED * 0.8 + g.phase) * IDLE_AMP;
-      const len = currentGateLength(g);
-      p.push();
-      p.translate(g.cx + idleX, g.cy + idleY);
-      p.rotate(g.rot);
-      p.rectMode(p.CENTER);
-      p.rect(0, 0, len, g.width);
-      p.pop();
+  // --- GENERADOR DE CORRIDA ---
+  function generateRun() {
+    obstacles = [];
+
+    // 1. Velocidades del círculo contrastantes por tramo
+    zoneSpeeds = [];
+    const speedsPool = [0.48, 0.60, 0.80, 1.30, 1.65, 1.95];
+    for (let i = 0; i <= OBSTACLE_COUNT; i++) {
+      zoneSpeeds.push(p.random(speedsPool));
     }
-  }
 
-  function toLocal(pt, g) {
-    const dx = pt.x - g.cx, dy = pt.y - g.cy;
-    const cosA = Math.cos(-g.rot), sinA = Math.sin(-g.rot);
-    return { x: dx * cosA - dy * sinA, y: dx * sinA + dy * cosA };
-  }
+    // 2. Sorteo con baja probabilidad de repetición
+    const chosenTypes = pickRunTypes();
 
-  function checkGateCollision() {
-    for (const g of gates) {
-      if (g.extend < GATE_DANGER_FROM) continue;
-      const len = currentGateLength(g);
-      const halfLen = len / 2 + player.r;
-      const halfWid = g.width / 2 + player.r;
-      const local = toLocal(player.pos, g);
-      if (Math.abs(local.x) < halfLen && Math.abs(local.y) < halfWid) {
-        killPlayer();
-        return;
+    const startMargin = 0.24;
+    const endMargin = 0.88;
+
+    for (let i = 0; i < OBSTACLE_COUNT; i++) {
+      const progress = p.map(i, 0, OBSTACLE_COUNT - 1, startMargin, endMargin);
+      let side = i % 2 === 0 ? 1 : -1;
+      const type = chosenTypes[i];
+
+      // --- Probabilidad diagonal invertido (30%) ---
+      let isInvertedDiagonal = false;
+      if (type === 'diagonal') {
+        isInvertedDiagonal = Math.random() < 0.30;
+        if (isInvertedDiagonal) {
+          side = -side;
+        }
       }
+
+      // --- Probabilidad rebote dinámico (1 a 4 ciclos) ---
+      let reboundTrips = 1;
+      let reboundDuration = 700;
+      if (type === 'rebound') {
+        const roll = Math.random();
+        if (roll < 0.35) {
+          reboundTrips = 1; // 35%
+        } else if (roll < 0.70) {
+          reboundTrips = 2; // 35%
+        } else if (roll < 0.92) {
+          reboundTrips = 3; // 22%
+        } else {
+          reboundTrips = 4; // 8% probabilidad mínima
+        }
+        reboundDuration = reboundTrips * 650;
+      }
+
+      // --- Probabilidad ataque doble X (30%) ---
+      let isDoubleX = false;
+      let xDuration = 850;
+      if (type === 'invisible') {
+        isDoubleX = Math.random() < 0.30;
+        xDuration = isDoubleX ? 1500 : 850;
+      }
+
+      obstacles.push({
+        type,
+        progress,
+        side,
+        offsetFactor: OFFSET_FACTOR,
+        sizeFactor: TRIANGLE_SIZE,
+        state: 'idle',
+        chargeStart: 0,
+        chargeDuration: 300,
+        launchStart: 0,
+        currentX: null,
+        currentY: null,
+        flickerPhase: 0,
+        targetDiagonalX: 0,
+        revealed: type !== 'invisible',
+
+        // Parámetros calculados independientemente
+        isInvertedDiagonal,
+        reboundTrips,
+        reboundDuration,
+        isDoubleX,
+        xDuration,
+        cloneX: null,
+        cloneY: null
+      });
     }
   }
 
-  // ---------- ciclo principal ----------
+  function obstacleX(o) {
+    return p.lerp(limitStart, limitEnd, o.progress);
+  }
+
+  function obstacleRestY(o) {
+    return lineY + o.side * (circleR * o.offsetFactor + wallGap);
+  }
+
+  function obstacleSize(o) {
+    return o.sizeFactor * SIZE_SCALE;
+  }
+
   p.draw = () => {
-    p.background(COLOR_BG);
-    updateGates();
-    drawGates();
-    drawSquares();
-    updatePlayer();
-    drawPlayer();
+    p.background(BG);
+
+    p.push();
+    p.translate(p.width / 2, p.height / 2);
+    p.rotate(p.radians(ROTATION_DEG));
+    p.translate(-p.width / 2, -p.height / 2);
+
+    drawSceneGeometry();
+    updatePosition();
+    updateObstacles();
+    drawObstacles();
+    drawCircle();
+
+    p.pop();
   };
 
-  // ---------- interacción ----------
+  function drawSceneGeometry() {
+    p.stroke(RED);
+    p.strokeWeight(2 * SIZE_SCALE);
+    p.line(-100, lineY, p.width + 100, lineY);
+
+    p.strokeWeight(3 * SIZE_SCALE);
+    p.line(limitStart, lineY - wallGap, limitStart, lineY - wallGap - wallLength);
+    p.line(limitEnd, lineY - wallGap, limitEnd, lineY - wallGap - wallLength);
+  }
+
+  function updatePosition() {
+    if (!isDragging) return;
+
+    let currentZone = 0;
+    for (let i = 0; i < obstacles.length; i++) {
+      if (circleX > obstacleX(obstacles[i])) {
+        currentZone = i + 1;
+      }
+    }
+    currentMaxStep = zoneSpeeds[currentZone] || 0.7;
+
+    const mouse = getLogicalMouse();
+    const desiredX = p.constrain(mouse.x, limitStart, limitEnd);
+
+    const maxStep = currentMaxStep * SIZE_SCALE;
+    const dx = (desiredX - circleX) * 0.12;
+    const step = p.constrain(dx, -maxStep, maxStep);
+    circleX += step;
+    circleY = lineY;
+
+    if (circleX >= limitEnd - 0.5) {
+      finishAndRestart();
+    }
+  }
+
+  function updateObstacles() {
+    const now = p.millis();
+    const dt = p.deltaTime / 1000;
+    const triggerDistance = circleR * 4.8;
+
+    for (const o of obstacles) {
+      const ox = obstacleX(o);
+      const restY = obstacleRestY(o);
+      const oppositeY = lineY - o.side * (circleR * o.offsetFactor + wallGap);
+
+      // --- 1. DETECCIÓN Y ACTIVACIÓN ---
+      if (o.state === 'idle') {
+        if (o.type === 'diagonal') {
+          if (circleX >= ox + circleR * 1.5) {
+            o.state = 'charging';
+            o.chargeStart = now;
+            o.chargeDuration = 320;
+            o.flickerPhase = 0;
+            o.targetDiagonalX = ox + 55 * SIZE_SCALE;
+          }
+        } else if (o.type === 'silent') {
+          if (circleX >= ox - circleR * 2.8) {
+            o.state = 'launching';
+            o.launchStart = now;
+            o.currentX = ox;
+            o.currentY = restY;
+          }
+        } else if (o.type === 'invisible') {
+          if (circleX >= ox - triggerDistance) {
+            o.revealed = true;
+            o.state = 'charging';
+            o.chargeStart = now;
+            o.chargeDuration = 380;
+            o.flickerPhase = 0;
+          }
+        } else {
+          // Rebote / normal
+          if (circleX >= ox - triggerDistance) {
+            o.state = 'charging';
+            o.chargeStart = now;
+            o.chargeDuration = 350;
+            o.flickerPhase = 0;
+          }
+        }
+      }
+
+      // --- 2. TITILEO / CARGA ---
+      else if (o.state === 'charging') {
+        const t = p.constrain((now - o.chargeStart) / o.chargeDuration, 0, 1);
+        o.flickerPhase += p.lerp(2, 16, t * t) * dt * p.TWO_PI;
+
+        if (t >= 1) {
+          o.state = 'launching';
+          o.launchStart = now;
+          o.currentX = ox;
+          o.currentY = restY;
+          if (o.type === 'invisible') {
+            o.cloneX = ox;
+            o.cloneY = oppositeY;
+          }
+        }
+      }
+
+      // --- 3. LANZAMIENTOS Y ATAQUES ---
+      else if (o.state === 'launching') {
+        // A) REBOTE DINÁMICO (1 a 4 ciclos)
+        if (o.type === 'rebound') {
+          const t = p.constrain((now - o.launchStart) / o.reboundDuration, 0, 1);
+          const cycleProgress = (t * o.reboundTrips) % 1;
+          let yFactor = 0;
+
+          if (cycleProgress < 0.20) {
+            yFactor = p.map(cycleProgress, 0, 0.20, 0, 1);
+          } else if (cycleProgress < 0.35) {
+            yFactor = 1;
+          } else if (cycleProgress < 0.90) {
+            yFactor = p.map(cycleProgress, 0.35, 0.90, 1, 0);
+          } else {
+            yFactor = 0;
+          }
+
+          o.currentX = ox;
+          o.currentY = p.lerp(restY, oppositeY, yFactor);
+
+          if (t >= 1) o.state = 'spent';
+        }
+
+        // B) DIAGONAL LENTO
+        else if (o.type === 'diagonal') {
+          const t = p.constrain((now - o.launchStart) / LAUNCH_MS_DIAGONAL, 0, 1);
+          const startX = ox - 35 * SIZE_SCALE;
+          o.currentX = p.lerp(startX, o.targetDiagonalX, t);
+          o.currentY = p.lerp(restY, oppositeY, t);
+
+          if (t >= 1) o.state = 'spent';
+        }
+
+        // C) INVISIBLE: ATAQUE EN X SIMPLE O DOBLE X CON REBOTE
+        else if (o.type === 'invisible') {
+          const t = p.constrain((now - o.launchStart) / o.xDuration, 0, 1);
+
+          if (o.isDoubleX) {
+            const gap = 20 * SIZE_SCALE;
+            let currentStartX, currentEndX;
+
+            if (t < 0.48) {
+              const subT = p.map(t, 0, 0.48, 0, 1);
+              currentStartX = ox + 65 * SIZE_SCALE;
+              currentEndX = ox + gap;
+              o.currentX = p.lerp(currentStartX, currentEndX, subT);
+              o.currentY = p.lerp(restY, oppositeY, subT);
+              o.cloneX = p.lerp(currentStartX, currentEndX, subT);
+              o.cloneY = p.lerp(oppositeY, restY, subT);
+            } else if (t < 0.54) {
+              o.currentX = ox + gap;
+              o.cloneX = ox + gap;
+            } else {
+              const subT = p.map(t, 0.54, 1, 0, 1);
+              currentStartX = ox - gap;
+              currentEndX = ox - 65 * SIZE_SCALE;
+              o.currentX = p.lerp(currentStartX, currentEndX, subT);
+              o.currentY = p.lerp(oppositeY, restY, subT);
+              o.cloneX = p.lerp(currentStartX, currentEndX, subT);
+              o.cloneY = p.lerp(restY, oppositeY, subT);
+            }
+          } else {
+            const startX = ox + 45 * SIZE_SCALE;
+            const endX = ox - 50 * SIZE_SCALE;
+
+            o.currentX = p.lerp(startX, endX, t);
+            o.currentY = p.lerp(restY, oppositeY, t);
+            o.cloneX = p.lerp(startX, endX, t);
+            o.cloneY = p.lerp(oppositeY, restY, t);
+          }
+
+          if (t >= 1) o.state = 'spent';
+        }
+
+        // D) ATAQUE RECTO SILENCIOSO
+        else {
+          const t = p.constrain((now - o.launchStart) / LAUNCH_MS_NORMAL, 0, 1);
+          o.currentX = ox;
+          o.currentY = p.lerp(restY, oppositeY, t);
+
+          if (t >= 1) o.state = 'spent';
+        }
+
+        // Colisiones
+        const d1 = p.dist(circleX, circleY, o.currentX, o.currentY);
+        if (d1 < circleR + obstacleSize(o) * 0.45) {
+          resetExperience();
+          return;
+        }
+
+        if (o.type === 'invisible' && o.cloneX !== null) {
+          const d2 = p.dist(circleX, circleY, o.cloneX, o.cloneY);
+          if (d2 < circleR + obstacleSize(o) * 0.45) {
+            resetExperience();
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  function drawObstacles() {
+    for (const o of obstacles) {
+      if (o.state === 'spent') continue;
+      if (o.type === 'invisible' && !o.revealed) continue;
+
+      const ox = o.currentX !== null ? o.currentX : obstacleX(o);
+      const oy = o.currentY !== null ? o.currentY : obstacleRestY(o);
+      const size = obstacleSize(o);
+
+      let col = p.color(RED);
+
+      if (o.state === 'charging') {
+        const blinkOn = Math.sin(o.flickerPhase) > 0;
+        col = p.color(blinkOn ? CREAM : RED);
+      } else if (o.state === 'launching') {
+        col = p.color(CREAM);
+      }
+
+      drawSingleTriangle(ox, oy, size, col, o);
+
+      if (o.type === 'invisible' && o.state === 'launching' && o.cloneX !== null) {
+        drawSingleTriangle(o.cloneX, o.cloneY, size, col, o, true);
+      }
+    }
+  }
+
+  function drawSingleTriangle(x, y, size, col, o, isClone = false) {
+    p.push();
+    p.translate(x, y);
+
+    let angle = o.side > 0 ? -p.HALF_PI : p.HALF_PI;
+
+    if (o.type === 'diagonal' && o.state === 'launching') {
+      const oppositeY = lineY - o.side * (circleR * o.offsetFactor + wallGap);
+      const startX = obstacleX(o) - 35 * SIZE_SCALE;
+      angle = Math.atan2(oppositeY - obstacleRestY(o), o.targetDiagonalX - startX);
+    } else if (o.type === 'invisible' && o.state === 'launching') {
+      const dirY = isClone ? o.side : -o.side;
+      angle = Math.atan2(dirY, -1);
+    }
+
+    p.rotate(angle);
+    p.noStroke();
+    p.fill(col);
+
+    const half = size / 2;
+    p.triangle(half, 0, -half, half, -half, -half);
+
+    p.pop();
+  }
+
+  function drawCircle() {
+    if (isDragging) {
+      p.noFill();
+      p.stroke(RED);
+      p.strokeWeight(2 * SIZE_SCALE);
+      p.circle(circleX, circleY, (circleR * 2) + (10 * SIZE_SCALE));
+    }
+
+    p.noStroke();
+    p.fill(RED);
+    p.circle(circleX, circleY, circleR * 2);
+  }
+
+  function resetExperience() {
+    circleX = limitStart;
+    circleY = lineY;
+    isDragging = false;
+    generateRun();
+  }
+
+  function finishAndRestart() {
+    circleX = limitStart;
+    circleY = lineY;
+    isDragging = false;
+    generateRun();
+  }
+
+  function getLogicalMouse() {
+    const cx = p.width / 2;
+    const cy = p.height / 2;
+    const theta = p.radians(ROTATION_DEG);
+
+    const dx = p.mouseX - cx;
+    const dy = p.mouseY - cy;
+
+    const x = dx * Math.cos(theta) + dy * Math.sin(theta) + cx;
+    const y = -dx * Math.sin(theta) + dy * Math.cos(theta) + cy;
+
+    return { x, y };
+  }
+
   function mouseInsideCanvas() {
     return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
   }
 
   p.mousePressed = () => {
-    if (!mouseInsideCanvas() || player.state !== 'alive' || activePointer !== null) return;
-    dragging = true;
-    activePointer = 'mouse';
-    pointerPos = { x: p.mouseX, y: p.mouseY };
-  };
-
-  p.mouseDragged = () => {
-    if (activePointer === 'mouse') {
-      pointerPos = { x: p.mouseX, y: p.mouseY };
+    if (!mouseInsideCanvas()) return;
+    const mouse = getLogicalMouse();
+    if (p.dist(mouse.x, mouse.y, circleX, circleY) < circleR * 2.5) {
+      isDragging = true;
     }
   };
 
   p.mouseReleased = () => {
-    if (activePointer === 'mouse') {
-      dragging = false;
-      activePointer = null;
-    }
+    isDragging = false;
   };
 
   p.touchStarted = () => {
-    if (player.state === 'alive' && activePointer === null && p.touches.length > 0) {
-      const t = p.touches[0];
-      dragging = true;
-      activePointer = t.id;
-      pointerPos = { x: t.x, y: t.y };
-      return false; // arrancó el arrastre: bloquear el gesto nativo
+    if (!mouseInsideCanvas()) return false;
+    const mouse = getLogicalMouse();
+    if (p.dist(mouse.x, mouse.y, circleX, circleY) < circleR * 2.5) {
+      isDragging = true;
     }
-    return true; // nada que arrastrar: dejar pasar el scroll
+    return false;
   };
 
   p.touchMoved = () => {
-    for (const t of p.touches) {
-      if (t.id === activePointer) {
-        pointerPos = { x: t.x, y: t.y };
-      }
-    }
-    return !dragging;
+    return false;
   };
 
   p.touchEnded = () => {
-    const stillActive = {};
-    for (const t of p.touches) stillActive[t.id] = true;
-    if (activePointer !== null && activePointer !== 'mouse' && !stillActive[activePointer]) {
-      dragging = false;
-      activePointer = null;
-    }
-    return true;
+    isDragging = false;
+    return false;
   };
 };
 
