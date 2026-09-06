@@ -13,9 +13,7 @@ const Memoria = (p) => {
     let WRAP_LEN; // distancia total del ciclo (igual para todas, evita desfasajes)
     const ROTATION_ANGLE = p.radians(-43); // rotacion del canvas, ajustable
 
-    // ---------- escala de tamaño, ahora como fraccion de ancho/alto ----------
-    // (antes eran valores fijos pensados para un canvas de 400x400;
-    // se guardan aca las mismas proporciones pero calculadas en vivo)
+    // ---------- escala de tamaño, como fraccion de ancho/alto ----------
     const SHAPE_SIZE_RATIO = 0.06;          // antes: 24 / 400
     const CURSOR_SIZE_RATIO = 0.075;        // antes: 30 / 400
     const MEMORY_START_X_RATIO = 0.3;       // antes: 120 / 400
@@ -27,6 +25,11 @@ const Memoria = (p) => {
 
     let SHAPE_SIZE, CURSOR_BASE_SIZE, MEMORY_START_X, MEMORY_COL_SPACING,
         MEMORY_ROW_SPACING, LINE_MARGIN, HIT_MARGIN;
+
+    // ---------- animacion de "agrandado" al clickear una forma ----------
+    const CLICKED_SIZE_RATIO = 0.080; // antes: 26 / 400
+    const CLICKED_SHRINK_EASE = 0.15; // velocidad de la interpolacion (0-1, mas alto = mas rapido)
+    let CLICKED_DISPLAY_SIZE;
 
     // cursor
     let cursorSize;
@@ -51,6 +54,7 @@ const Memoria = (p) => {
         MEMORY_ROW_SPACING = p.height * MEMORY_ROW_SPACING_RATIO;
         LINE_MARGIN = p.width * LINE_MARGIN_RATIO;
         HIT_MARGIN = minSide * HIT_MARGIN_RATIO;
+        CLICKED_DISPLAY_SIZE = minSide * CLICKED_SIZE_RATIO;
     }
 
     p.setup = function() {
@@ -82,6 +86,7 @@ const Memoria = (p) => {
 
         for (const s of shapes) {
             s.size *= sizeRatio;
+            s.displaySize *= sizeRatio; // el propio valor objetivo (CLICKED_DISPLAY_SIZE) ya se recalcula en computeSizes()
             s.offset *= wrapRatio; // mantiene la separación relativa entre formas
         }
         for (const m of memories) m.size *= sizeRatio;
@@ -98,7 +103,7 @@ const Memoria = (p) => {
         p.translate(-p.width / 2, -p.height / 2);
 
         p.stroke('#F0D583');
-        p.strokeWeight(p.width / 200);
+        p.strokeWeight(2);
         p.line(-LINE_MARGIN, lineY, p.width + LINE_MARGIN, lineY);
 
         DrawShapes();
@@ -129,6 +134,7 @@ const Memoria = (p) => {
             lastCycle: 0,
             clicked: false, // evita generar mas de un clon por ciclo
             size: SHAPE_SIZE,
+            displaySize: SHAPE_SIZE, // tamaño animado que se muestra en pantalla
             type: p.random(TYPES),
             color: p.random(COLORS)
         };
@@ -170,7 +176,13 @@ const Memoria = (p) => {
                 s.clicked = false;
             }
 
-            drawShapeAt(s.x, lineY, s.size, s.type, s.color);
+            // el tamaño objetivo depende de si la forma ya fue clickeada:
+            // un tamaño fijo (26px relativos a pantalla) mientras "clicked" es true,
+            // normal apenas se resetea al inicio del siguiente ciclo
+            let targetSize = s.clicked ? CLICKED_DISPLAY_SIZE : s.size;
+            s.displaySize = p.lerp(s.displaySize, targetSize, CLICKED_SHRINK_EASE);
+
+            drawShapeAt(s.x, lineY, s.displaySize, s.type, s.color);
         }
     }
 
