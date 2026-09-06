@@ -60,18 +60,24 @@ const sketchIdentidad = (p) => {
     }
     
     p.background(bgColor);
-    
+ 
     p.push();
     p.translate(p.width / 2, p.height / 2);
     p.rotate(ROTATION_ANGLE);
     p.translate(-p.width / 2, -p.height / 2);
     
+
     // línea
     p.stroke(colorLine);
     p.strokeWeight(p.width / 200);
     p.line(-p.width * 0.25, lineY, p.width * 1.25, lineY);
     
     drawShapes();
+    p.push();
+    p.noStroke();
+    p.fill(bgColor);
+    p.rect(0, 0, p.width, p.height/5); //no se programar
+    p.pop();
     ShapesWithIdentityMovement();
     
     if (dragging) {
