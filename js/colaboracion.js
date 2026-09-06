@@ -289,26 +289,26 @@ p.windowResized = () => {
     }
   }
 
-  function applySpringConstraints() {
+function applySpringConstraints() {
     const scaledMaxStretch = BASE_MAX_STRETCH * currentScale;
     const springFactor = 0.12; // Valor constante de tensión
 
     for (const [i, j] of edges) {
       const a = particles[i], b = particles[j];
       if (!a.active || !b.active) continue;
+      
       const d = p.dist(a.x, a.y, b.x, b.y);
       if (d > scaledMaxStretch) {
         const excess = d - scaledMaxStretch;
         const dx = (b.x - a.x) / d, dy = (b.y - a.y) / d;
-        const aCrossed = sideDistance(a.x, a.y) > 0;
-        const bCrossed = sideDistance(b.x, b.y) > 0;
         
-        if (!isHeld(a) && !aCrossed) { a.x += dx * excess * springFactor; a.y += dy * excess * springFactor; }
-        if (!isHeld(b) && !bCrossed) { b.x -= dx * excess * springFactor; b.y -= dy * excess * springFactor; }
+        // Eliminamos las variables aCrossed y bCrossed. 
+        // Ahora el resorte funciona libremente cruzando la línea.
+        if (!isHeld(a)) { a.x += dx * excess * springFactor; a.y += dy * excess * springFactor; }
+        if (!isHeld(b)) { b.x -= dx * excess * springFactor; b.y -= dy * excess * springFactor; }
       }
     }
   }
-
   function clampAll(roots) {
     for (const pt of particles) {
       if (!pt.active || pt.entering) continue;
