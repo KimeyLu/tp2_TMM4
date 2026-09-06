@@ -5,29 +5,48 @@ const Herencia = (p) => {
   let draggingShape = null;  // referencia a la forma que se esta arrastrando
   let children = [];         // formas hijas que viajan por la linea
   let merging = [];          // fusiones en curso (A y B yendo hacia C)
- 
+
   const TYPES = ['circle', 'square', 'triangle'];
   const COLORS = ['#F0D583', '#121212'];
- 
-  // tamaño base de las formas (a 400x400). El tamaño real (SHAPE_SIZE) se
-  // recalcula con computeSizeScale() para que se vea bien en otros tamaños
-  // de canvas (por ejemplo en fullscreen).
-  const BASE_SHAPE_SIZE = 24;
+
+  // tamaño de referencia del "diseño" original (canvas cuadrado con el que
+  // se pensaron todas las proporciones). Se usa solo para calcular el
+  // factor de escala; ya no aparece ningun otro numero fijo en pixeles.
+  const BASE_CANVAS_SIZE = 400;
+
+  // tamaño base de las formas, expresado como fraccion del tamaño de
+  // referencia (24 / 400). El tamaño real (SHAPE_SIZE) se recalcula con
+  // computeSizeScale() para que se vea bien en otros tamaños de canvas
+  // (por ejemplo en fullscreen).
+  const BASE_SHAPE_RATIO = 24 / BASE_CANVAS_SIZE;
   let SHAPE_SIZE;
   let SIZE_SCALE = 1;
- 
+
   function computeSizeScale() {
-    const ratio = Math.min(p.width, p.height) / 400;
+    const ratio = Math.min(p.width, p.height) / BASE_CANVAS_SIZE;
     return ratio <= 1 ? ratio : ratio * 1.25;
   }
- 
+
   // posiciones donde quedan las formas al soltarlas en C, como proporcion
   // del canvas (antes eran pixeles fijos calculados a mano para 400x400),
   // asi se recalculan bien si el canvas cambia de tamaño.
   let SNAP_A, SNAP_B;
- 
+
+  // margen extra (mas alla del rect visual) donde tambien se puede soltar
+  // una forma para que cuente como "sobre C", como fraccion del ancho.
+  const DROP_MARGIN_RATIO = 0.1;
+
+  // cuanto se extiende la linea mas alla de los bordes del canvas, y a
+  // partir de donde se considera que una forma hija "salio" del todo.
+  const LINE_EXTEND_RATIO = 0.25;
+
+  // desplazamiento inicial de la forma hija respecto del punto de fusion,
+  // y velocidad de viaje por la linea, ambos como fraccion del ancho.
+  const CHILD_OFFSET_RATIO = 5 / BASE_CANVAS_SIZE;
+  const CHILD_SPEED_RATIO = 2 / BASE_CANVAS_SIZE;
+
   const ROTATION_DEG = -40; // angulo de rotacion de todo el sketch
- 
+
   function computeLayout() {
     rectA = { x: p.width / 5, y: p.height / 5, w: p.width / 8, h: p.height / 8 };
     rectC = { x: p.width / 2.3, y: p.height / 4, w: p.width / 8, h: p.height / 8 };
@@ -36,7 +55,7 @@ const Herencia = (p) => {
     SNAP_A = { x: p.width * 0.375, y: p.height * 0.32 };
     SNAP_B = { x: p.width * 0.6, y: p.height * 0.32 };
   }
- 
+
   // reubica las formas padre existentes segun el layout ACTUAL: si todavia
   // no fueron soltadas en C, al centro de su rectangulo; si ya estaban
   // colocadas, al punto de snap correspondiente. Esto es lo que evita que
@@ -61,26 +80,26 @@ const Herencia = (p) => {
       }
     }
   }
- 
+
   p.setup = function() {
-    p.createCanvas(400, 400);
+    p.createCanvas(BASE_CANVAS_SIZE, BASE_CANVAS_SIZE);
     p.rectMode(p.CORNER);
     SIZE_SCALE = computeSizeScale();
-    SHAPE_SIZE = BASE_SHAPE_SIZE * SIZE_SCALE;
+    SHAPE_SIZE = BASE_SHAPE_RATIO * BASE_CANVAS_SIZE * SIZE_SCALE;
     computeLayout();
- 
+
     [parentA, parentB] = spawnParentPair();
   }
- 
+
   p.windowResized = function() {
-    const { w, h } = window.getCanvasTargetSize('herencia', 400, 400);
+    const { w, h } = window.getCanvasTargetSize('herencia', BASE_CANVAS_SIZE, BASE_CANVAS_SIZE);
     p.resizeCanvas(w, h);
- 
+
     const oldScale = SIZE_SCALE;
     computeLayout();
     SIZE_SCALE = computeSizeScale();
-    SHAPE_SIZE = BASE_SHAPE_SIZE * SIZE_SCALE;
- 
+    SHAPE_SIZE = BASE_SHAPE_RATIO * BASE_CANVAS_SIZE * SIZE_SCALE;
+
     const ratio = SIZE_SCALE / oldScale;
     if (parentA) parentA.size *= ratio;
     if (parentB) parentB.size *= ratio;
@@ -93,56 +112,58 @@ const Herencia = (p) => {
       c.baseSize *= ratio;
       c.size *= ratio;
     }
- 
+
     repositionParents();
   }
- 
+
   p.draw = function() {
     p.background('#970510');
- 
+
     p.push();
     p.translate(p.width / 2, p.height / 2);
     p.rotate(p.radians(ROTATION_DEG));
     p.translate(-p.width / 2, -p.height / 2);
- 
+
+    const lineExtend = p.width * LINE_EXTEND_RATIO;
+
     p.stroke('#F0D583');
-    p.strokeWeight(2);
-    p.line(-100, p.height / 2, p.width + 100, p.height / 2);
- 
+    p.strokeWeight(p.width / 200);
+    p.line(-lineExtend, p.height / 2, p.width + lineExtend, p.height / 2);
+
     DrawRectZones();
     ParentShapesActions();
     TryStartMerge();
     AnimateMerging();
     BornChildShape();
- 
+
     p.pop();
   }
- 
+
   // ---------- zonas ----------
   function DrawRectZones() {
     p.push();
     p.noFill();
     p.stroke('#F0D583');
-    p.strokeWeight(4);
+    p.strokeWeight(p.width / 100);
     p.rect(rectA.x, rectA.y, rectA.w, rectA.h);
     p.rect(rectC.x, rectC.y, rectC.w, rectC.h);
     p.rect(rectB.x, rectB.y, rectB.w, rectB.h);
     p.pop();
   }
- 
+
   // ---------- formas padre (A y B) ----------
   // genera el par de formas para A y B, asegurando que siempre tengan
   // colores distintos entre si (el tipo de forma puede repetirse sin problema)
   function spawnParentPair() {
     const a = spawnShape('A');
     const otherColor = COLORS.find(c => c !== a.color) || a.color;
- 
+
     const b = spawnShape('B');
     b.color = otherColor;
- 
+
     return [a, b];
   }
- 
+
   function spawnShape(slot) {
     const rect = slot === 'A' ? rectA : rectB;
     return {
@@ -157,12 +178,12 @@ const Herencia = (p) => {
     };
   }
 
- 
+
   function ParentShapesActions() {
     if (parentA) { updatePlacedShrink(parentA); drawShape(parentA); }
     if (parentB) { updatePlacedShrink(parentB); drawShape(parentB); }
   }
- 
+
   // cuando una forma se suelta en C, va reduciendo su tamaño a la mitad
   function updatePlacedShrink(s) {
     if (s.placed && s.shrinkT < 1) {
@@ -171,7 +192,7 @@ const Herencia = (p) => {
       s.size = p.lerp(SHAPE_SIZE, SHAPE_SIZE / 2, e);
     }
   }
- 
+
   function drawShape(s) {
     p.push();
     p.noStroke();
@@ -197,18 +218,18 @@ const Herencia = (p) => {
     }
     p.pop();
   }
- 
+
   function isOver(s, mx, my) {
     return Math.abs(mx - s.x) < s.size / 2 && Math.abs(my - s.y) < s.size / 2;
   }
- 
+
   function isOverRectC(mx, my) {
     // zona de soltado un poco mas amplia que el rect visual, para que sea comodo soltar
-    const margin = 40;
+    const margin = p.width * DROP_MARGIN_RATIO;
     return mx > rectC.x - margin && mx < rectC.x + rectC.w + margin &&
            my > rectC.y - margin && my < rectC.y + rectC.h + margin;
   }
- 
+
   // como todo el sketch se dibuja rotado, esta funcion convierte la posicion
   // del mouse (que p5 siempre da en coordenadas de pantalla) a las coordenadas
   // "del mundo" que usan las formas, aplicando la rotacion inversa
@@ -223,14 +244,14 @@ const Herencia = (p) => {
       y: cy + dx * Math.sin(ang) + dy * Math.cos(ang)
     };
   }
- 
+
   // ---------- forma hija ----------
   function inherit(a, b) {
     const type = (a.type === b.type) ? a.type : p.random([a.type, b.type]);
     const color = (a.color === b.color) ? a.color : p.random([a.color, b.color]);
     return { type, color };
   }
- 
+
   // easings para las animaciones
   function easeOutBack(t) {
     const c1 = 1.70158;
@@ -246,12 +267,12 @@ const Herencia = (p) => {
   function easeOutQuad(t) {
     return 1 - (1 - t) * (1 - t);
   }
- 
+
   const GROW_STEP = 0.06;    // velocidad de la animacion de aparicion
   const TOLINE_STEP = 0.025; // velocidad del desplazamiento hacia la linea
   const MERGE_STEP = 0.04;   // velocidad de la fusion de A y B hacia C
   const SHRINK_STEP = 0.08;  // velocidad del achicado al soltarse en C
- 
+
   // ---------- fusion de A y B en C ----------
   // arranca recien cuando ambas formas estan sueltas en C y ya terminaron
   // su animacion de achicado a la mitad
@@ -260,12 +281,12 @@ const Herencia = (p) => {
       startMerge();
     }
   }
- 
+
   function startMerge() {
     const traits = inherit(parentA, parentB);
     const centerX = (SNAP_A.x + SNAP_B.x) / 2;
     const centerY = (SNAP_A.y + SNAP_B.y) / 2;
- 
+
     // A y B (ya reducidas a la mitad) viajan hacia C encogiendose del todo
     // y desvaneciendose; recien al terminar esa fusion nace la forma hija
     merging.push({
@@ -277,41 +298,43 @@ const Herencia = (p) => {
       t: 0,
       traits
     });
- 
+
     // las formas padre desaparecen de A y B y nacen otras nuevas ahi
     [parentA, parentB] = spawnParentPair();
   }
- 
+
   function AnimateMerging() {
     for (let i = merging.length - 1; i >= 0; i--) {
       const m = merging[i];
       m.t = Math.min(1, m.t + MERGE_STEP);
       const e = easeInQuad(m.t);
- 
+
       m.a.x = p.lerp(m.a.startX, m.centerX, e);
       m.a.y = p.lerp(m.a.startY, m.centerY, e);
       m.a.size = m.baseSize * (1 - e);
       m.a.alpha = 255 * (1 - e);
- 
+
       m.b.x = p.lerp(m.b.startX, m.centerX, e);
       m.b.y = p.lerp(m.b.startY, m.centerY, e);
       m.b.size = m.baseSize * (1 - e);
       m.b.alpha = 255 * (1 - e);
- 
+
       drawShape(m.a);
       drawShape(m.b);
- 
+
       if (m.t >= 1) {
         spawnChild(m.centerX, m.centerY, m.traits);
         merging.splice(i, 1);
       }
     }
   }
- 
+
   function BornChildShape() {
+    const lineExtend = p.width * LINE_EXTEND_RATIO;
+
     for (let i = children.length - 1; i >= 0; i--) {
       const c = children[i];
- 
+
       if (c.state === 'growing') {
         c.growT = Math.min(1, c.growT + GROW_STEP);
         c.size = c.baseSize * easeOutBack(c.growT);
@@ -329,20 +352,20 @@ const Herencia = (p) => {
       } else if (c.state === 'traveling') {
         c.x += c.speed;
       }
- 
+
       drawShape(c);
- 
-      if (c.state === 'traveling' && c.x > p.width + 100 + c.size) {
+
+      if (c.state === 'traveling' && c.x > p.width + lineExtend + c.size) {
         children.splice(i, 1);
       }
     }
   }
- 
+
   function spawnChild(x, y, traits) {
     children.push({
       type: traits.type,
       color: traits.color,
-      x: x + 5,
+      x: x + p.width * CHILD_OFFSET_RATIO,
       y: y,
       startY: y,
       targetY: p.height / 2,
@@ -351,15 +374,15 @@ const Herencia = (p) => {
       growT: 0,
       moveT: 0,
       state: 'growing',
-      speed: 2
+      speed: p.width * CHILD_SPEED_RATIO
     });
   }
- 
+
   // ---------- interaccion con el mouse ----------
   function mouseInsideCanvas() {
     return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
   }
- 
+
   p.mousePressed = () => {
     if (!mouseInsideCanvas()) return;
     const w = screenToWorld(p.mouseX, p.mouseY);
@@ -369,7 +392,7 @@ const Herencia = (p) => {
       draggingShape = parentB;
     }
   }
- 
+
   p.mouseDragged = function() {
     if (draggingShape) {
       const w = screenToWorld(p.mouseX, p.mouseY);
@@ -377,12 +400,12 @@ const Herencia = (p) => {
       draggingShape.y = w.y;
     }
   }
- 
+
   p.mouseReleased = function() {
     if (!draggingShape) return;
- 
+
     const w = screenToWorld(p.mouseX, p.mouseY);
- 
+
     if (isOverRectC(w.x, w.y)) {
       const snap = draggingShape.slot === 'A' ? SNAP_A : SNAP_B;
       draggingShape.x = snap.x;
@@ -395,9 +418,9 @@ const Herencia = (p) => {
       draggingShape.x = rect.x + rect.w / 2;
       draggingShape.y = rect.y + rect.h / 2;
     }
- 
+
     draggingShape = null;
   }
 };
- 
+
 new p5(Herencia, 'herencia');
