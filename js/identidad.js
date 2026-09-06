@@ -1,15 +1,14 @@
 const sketchIdentidad = (p) => {
  
   // ------ Constantes relativas ------
-  const lineYRatio = 0.25;       // 25% (Arriba: camino original)
-  const dividerYRatio = 0.5;     // 50% (Umbral invisible)
-  const newLineYRatio = 0.75;    // 75% (Abajo: camino de identidad propia)
+  const lineYRatio = 0.25;       
+  const dividerYRatio = 0.5;     
+  const newLineYRatio = 0.75;    
   
   const squareSizeRatio = 0.06;
-  const lineSpeedRatio = 0.0015; // Velocidad pausada
-  const leaveSpeedRatio = 0.0015; // Velocidad pausada
+  const lineSpeedRatio = 0.0015; 
+  const leaveSpeedRatio = 0.0015; 
   
-  // Distancia constante entre los cuadrados (15% del ancho del canvas)
   const shapeSpacing = 0.15; 
   
   const colorLine = '#121212';
@@ -29,9 +28,6 @@ const sketchIdentidad = (p) => {
     p.createCanvas(400, 400);
     updateDimensions();
     
-    // Pre-poblar la línea con cuadrados para que ya estén todos desde el principio.
-    // Recorremos de derecha a izquierda para que el último del array sea el que
-    // está más a la izquierda, permitiendo controlar cuándo generar el siguiente.
     for (let x = 1.5; x >= -0.2; x -= shapeSpacing) {
       lineShapes.push(createShape(x, lineYRatio, 'square', colorLine));
     }
@@ -41,7 +37,6 @@ const sketchIdentidad = (p) => {
     const { w, h } = window.getCanvasTargetSize('identidad', 400, 400);
     p.resizeCanvas(w, h);
     updateDimensions();
-    // Ya no necesitamos reescalar manualmente 'x' porque todo es relativo (relX, relY)
   }
   
   function updateDimensions() {
@@ -49,7 +44,6 @@ const sketchIdentidad = (p) => {
     canvasHeight = p.height;
   }
   
-  // Función para crear formas usando posiciones relativas (0.0 a 1.0)
   function createShape(relX, relY, kind, color) {
     return {
       id: shapeCounter++,
@@ -57,7 +51,12 @@ const sketchIdentidad = (p) => {
       relY: relY,
       kind: kind,
       color: color,
-      transformed: false
+      transformed: false,
+      scaleMultiplier: 1.0, 
+      angle: 0,             
+      // Identidad oculta que se mantiene siempre para esta figura
+      hiddenKind: randomKind(),       
+      hiddenAngle: p.random(-0.5, 0.5) // Rotación fija aleatoria
     };
   }
   
@@ -79,7 +78,7 @@ const sketchIdentidad = (p) => {
     p.strokeWeight(p.width / 200);
     p.line(-p.width * 0.5, lineY, p.width * 1.5, lineY);
     
-    // 2. Nueva línea de identidad (abajo, roja)
+    // 2. Nueva línea de identidad (abajo)
     let newLineY = canvasHeight * newLineYRatio;
     p.stroke(colorIdentidad);
     p.strokeWeight(p.width / 200);
@@ -108,9 +107,8 @@ const sketchIdentidad = (p) => {
     // ---- FIGURAS DE LA LÍNEA SUPERIOR ----
     for (let i = lineShapes.length - 1; i >= 0; i--) {
       let shape = lineShapes[i];
-      shape.relX += lineSpeedRatio; // Avance por porcentaje, no por píxeles
+      shape.relX += lineSpeedRatio; 
       
-      // Si se pasa del límite derecho, se elimina
       if (shape.relX > 1.5) {
         lineShapes.splice(i, 1);
         continue;
@@ -118,7 +116,6 @@ const sketchIdentidad = (p) => {
       drawShapeRelative(shape);
     }
     
-    // Generar un nuevo cuadrado a la izquierda solo si el último liberó espacio
     let leftmostShape = lineShapes[lineShapes.length - 1];
     if (!leftmostShape || leftmostShape.relX >= -0.2 + shapeSpacing) {
       lineShapes.push(createShape(-0.2, lineYRatio, 'square', colorLine));
@@ -130,7 +127,7 @@ const sketchIdentidad = (p) => {
       
       if (shape.state === 'leaving_backwards') {
         shape.relX -= leaveSpeedRatio;
-        // Si sale del límite izquierdo, se elimina
+        
         if (shape.relX < -0.5) {
           freeShapes.splice(i, 1);
           continue;
@@ -145,12 +142,12 @@ const sketchIdentidad = (p) => {
     p.noStroke();
     p.fill(shape.color);
     
-    // Convertir de posición relativa a píxeles exactos en el frame actual
     let absX = shape.relX * canvasWidth;
     let absY = shape.relY * canvasHeight;
-    let s = canvasWidth * squareSizeRatio;
+    let s = (canvasWidth * squareSizeRatio) * shape.scaleMultiplier;
     
     p.translate(absX, absY);
+    p.rotate(shape.angle); 
     
     if (shape.kind === 'circle') {
       p.ellipse(0, 0, s, s);
@@ -168,7 +165,6 @@ const sketchIdentidad = (p) => {
     return kinds[Math.floor(p.random(kinds.length))];
   }
   
-  // Detección de mouse usando el cálculo relativo
   function isOverShape(absX, absY, shape) {
     let shapeAbsX = shape.relX * canvasWidth;
     let shapeAbsY = shape.relY * canvasHeight;
@@ -201,18 +197,27 @@ const sketchIdentidad = (p) => {
     if (dragging) {
       let local = toLocalCoords(p.mouseX, p.mouseY);
       
-      // Actualizar posición arrastrando basándose en porcentajes
       dragging.relX = local.x / canvasWidth;
       dragging.relY = local.y / canvasHeight;
       
-      if (dragging.fromLine && dragging.relY > dividerYRatio && !dragging.transformed) {
-        dragging.kind = randomKind();
+      // Umbral para transformarse: apenas un poco por debajo de la línea original
+      let pullThreshold = lineYRatio + 0.05; 
+      
+      // Se despega de la línea: adopta su identidad oculta
+      if (dragging.fromLine && dragging.relY > pullThreshold && !dragging.transformed) {
+        dragging.kind = dragging.hiddenKind;
         dragging.color = colorIdentidad;
         dragging.transformed = true;
-      } else if (dragging.fromLine && dragging.relY <= dividerYRatio && dragging.transformed) {
+        dragging.scaleMultiplier = 1.25; 
+        dragging.angle = dragging.hiddenAngle; // Adopta su rotación fija
+      } 
+      // Vuelve a la línea: recupera el formato uniforme
+      else if (dragging.fromLine && dragging.relY <= pullThreshold && dragging.transformed) {
         dragging.kind = 'square';
         dragging.color = colorLine;
         dragging.transformed = false;
+        dragging.scaleMultiplier = 1.0; 
+        dragging.angle = 0;             
       }
     }
   }
@@ -220,18 +225,32 @@ const sketchIdentidad = (p) => {
   p.mouseReleased = function() {
     if (!dragging) return;
     
+    // Si la soltás habiendo pasado la mitad de la pantalla
     if (dragging.relY > dividerYRatio) {
       dragging.relY = newLineYRatio;
       dragging.state = 'leaving_backwards';
       delete dragging.fromLine;
+      
+      // Aseguramos que muestre su identidad (por si el movimiento fue muy brusco)
+      dragging.kind = dragging.hiddenKind;
+      dragging.color = colorIdentidad;
+      dragging.scaleMultiplier = 1.25;
+      dragging.angle = dragging.hiddenAngle;
+      
       freeShapes.push(dragging);
-    } else {
+    } 
+    // Si la soltás antes de la mitad, vuelve al rebaño original
+    else {
       dragging.kind = 'square';
       dragging.color = colorLine;
       dragging.relY = lineYRatio;
       dragging.transformed = false;
+      dragging.scaleMultiplier = 1.0;
+      dragging.angle = 0;
       delete dragging.state;
       delete dragging.fromLine;
+      
+      // Como devolvemos el MISMO objeto al array, conserva sus propiedades "hidden"
       lineShapes.push(dragging);
     }
     

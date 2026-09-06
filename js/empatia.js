@@ -3,421 +3,395 @@ const sketchEmpatia = (p) => {
   const BLACK = '#141414';
   const RED = '#970511';
 
-  const N_BLACK = 10;
-  const N_RED = 2;
-  const REPEL_RADIUS = 150;
-  const CONNECT_RADIUS = 60;
-  const BOND_DISTANCE = 65;
-  const REPEL_MAX_PUSH = 25;
-  const DRAG_EASE = 0.22; // qué tan rápido la figura arrastrada alcanza su posición objetivo (más bajo = más suave/elástico)
-  const GROW_MS = 3500;
-  const DECAY_MS = 7000;
-  const MAX_SPEED_MULT = 3;
-  const CONVERGE_DURATION = 2200;
-  const FADE_DURATION = 500;
+  const ROTATION_DEG = -43;
+  let lineY;
 
-  let container;
-  let particles = [];
-  let networkEdges = [];
-  let activeTouches = {};
-  let phase = 'play';
-  let convergeStart = 0;
-  let fadeState = null;
-  let fadeStart = 0;
-  let fadeAlpha = 0;
-  let colBlack, colRed;
+  let blackShapes = [];
+  let redShape = null;
+  let draggingPt = null;
+
+  // 'interact' -> interacción normal | 'exiting' -> deslizándose por la diagonal
+  let phase = 'interact';
+  const EXIT_SPEED = 2.4;
+  const EXIT_LIMIT_X = 0; // se calcula en base al ancho al entrar en 'exiting'
+
+  const BASE_CANVAS = 400;
+  const BASE_BLACK_R = 24;
+  const BASE_RED_R = 26;
+
+  function scaledRadius(base) {
+    // Siempre se calcula desde la base fija, nunca se multiplica
+    // sobre un valor ya escalado (eso es lo que causaba el achique
+    // acumulativo en cada resize/reinicio).
+    return base * (p.width / BASE_CANVAS);
+  }
 
   p.setup = () => {
-    container = document.getElementById('empatia');
+    let container = document.getElementById('empatia');
     p.createCanvas(400, 400);
-    colBlack = p.color(BLACK);
-    colRed = p.color(RED);
+    lineY = p.height / 2;
     resetAll();
   };
-p.windowResized = () => {
-  const { w, h } = window.getCanvasTargetSize('empatia', 400, 400);
-  p.resizeCanvas(w, h);
-  resetAll();
-};
-  function resetAll() {
-    particles = [];
-    networkEdges = [];
-    activeTouches = {};
 
-    const total = N_BLACK + N_RED;
-    const cols = 4, rows = Math.ceil(total / cols);
-    const cellW = p.width / cols, cellH = p.height / rows;
-    const cells = [];
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) cells.push([c, r]);
-    shuffleArray(cells);
+  function getCornerLocal(marginPx) {
+    // Convierte un punto cercano a la esquina inferior derecha DE PANTALLA
+    // a coordenadas locales (antes de rotar), para que al dibujarse con la
+    // rotación de -43° termine viéndose realmente en esa esquina visual.
+    return toLocalCoords(p.width - marginPx, p.height - marginPx);
+  }
+
+  function resetAll() {
+    blackShapes = [];
+    phase = 'interact';
+
+    // Figura roja solitaria cerca de la esquina inferior derecha (visual)
+    const redR = scaledRadius(BASE_RED_R);
+    const corner = getCornerLocal(redR + 20);
+    redShape = {
+      x: corner.x,
+      y: corner.y,
+      baseX: corner.x,
+      baseY: corner.y,
+      r: redR,
+      shape: 'circle',
+      settled: false,
+      jitterX: 0,
+      jitterY: 0
+    };
 
     const shapes = ['circle', 'square', 'triangle'];
-    let id = 0;
-    for (let i = 0; i < total; i++) {
-      const [c, r] = cells[i];
-      const rad = p.random(24, 32);
-      const cx = p.constrain(c * cellW + cellW / 2 + p.random(-cellW * 0.2, cellW * 0.2), rad, p.width - rad);
-      const cy = p.constrain(r * cellH + cellH / 2 + p.random(-cellH * 0.2, cellH * 0.2), rad, p.height - rad);
-      const isRed = i < N_RED;
-      particles.push({
-        id: id++,
-        shape: shapes[p.floor(p.random(shapes.length))],
-        r: rad,
-        x: cx, y: cy,
-        homeX: cx, homeY: cy,
-        dragTargetX: cx, dragTargetY: cy, // posición cruda del dedo/mouse mientras se arrastra
-        vx: 0, vy: 0,
+    for (let i = 0; i < 6; i++) {
+      blackShapes.push({
+        id: i,
+        shape: shapes[i % shapes.length],
+        r: scaledRadius(BASE_BLACK_R),
+        x: p.random(p.width * 0.1, p.width * 0.4),
+        y: p.random(p.height * 0.1, p.height * 0.35), // Del lado de arriba (y < lineY)
+        vx: p.random(0.2, 0.4) * (p.random() > 0.5 ? 1 : -1),
+        vy: p.random(0.2, 0.4) * (p.random() > 0.5 ? 1 : -1),
         rot: p.random(-0.3, 0.3),
-        phase: p.random(1000),
-        isRed,
-        repulsionStrength: isRed ? 1.0 : 0,
-        connectProgress: isRed ? 1 : 0,
-        dragging: false,
-        active: true
+        progress: 0,
+        settled: false,
+        originX: 0,
+        originY: 0
       });
     }
-    phase = 'play';
   }
 
-  function shuffleArray(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = p.floor(p.random(i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
+  p.windowResized = () => {
+    const oldW = p.width;
+    const oldH = p.height;
+    const oldBaseX = redShape ? redShape.baseX : 0;
+    const oldBaseY = redShape ? redShape.baseY : 0;
+    const offsetX = redShape ? redShape.x - oldBaseX : 0;
+    const offsetY = redShape ? redShape.y - oldBaseY : 0;
+
+    let w = 400, h = 400;
+    if (typeof window.getCanvasTargetSize === 'function') {
+      const size = window.getCanvasTargetSize('empatia', 400, 400);
+      if (size && size.w && size.h) {
+        w = size.w;
+        h = size.h;
+      }
     }
-  }
+
+    if (oldW > 0 && oldH > 0) {
+      const scaleX = w / oldW;
+      const scaleY = h / oldH;
+
+      for (let pt of blackShapes) {
+        pt.x *= scaleX;
+        pt.y *= scaleY;
+        pt.originX *= scaleX;
+        pt.originY *= scaleY;
+      }
+    }
+
+    p.resizeCanvas(w, h);
+    lineY = p.height / 2;
+
+    // Los tamaños se recalculan siempre desde la base fija (no se multiplican
+    // sobre el valor anterior), para que no se vayan achicando con cada resize
+    if (redShape) redShape.r = scaledRadius(BASE_RED_R);
+    for (let pt of blackShapes) {
+      pt.r = scaledRadius(BASE_BLACK_R);
+    }
+
+    // Aseguramos que ninguna quede fuera de su zona apenas cambia el tamaño
+    for (let pt of blackShapes) {
+      if (!pt.settled) {
+        pt.x = p.constrain(pt.x, pt.r, p.width - pt.r);
+        pt.y = p.constrain(pt.y, pt.r, lineY - pt.r);
+      }
+    }
+
+    if (redShape) {
+      const corner = getCornerLocal(redShape.r + 20);
+      redShape.baseX = corner.x;
+      redShape.baseY = corner.y;
+      // Conserva el pequeño desplazamiento que tuviera (temblor, repulsión, etc.)
+      redShape.x = corner.x + offsetX;
+      redShape.y = corner.y + offsetY;
+    }
+  };
 
   p.draw = () => {
     p.background(BG);
- //   drawDecorations();
 
-    if (phase === 'play') updatePlay();
-    else if (phase === 'converge') updateConverge();
-    else if (phase === 'fade') updateFade();
-
-    drawNetworkEdges();
-    drawParticles();
-
-    if (phase === 'fade') {
-      p.noStroke();
-      p.fill(BG + hex2(p.round(fadeAlpha)));
-      p.rect(0, 0, p.width, p.height);
-    }
-  };
-
-  function hex2(n) {
-    let s = n.toString(16);
-    while (s.length < 2) s = '0' + s;
-    return s;
-  }
-
-  function drawDecorations() {
+    // Sistema de coordenadas rotado (-43 deg), idéntico al resto de los interactivos
     p.push();
-    const s = p.min(p.width, p.height) * 0.3;
-    p.noFill();
+    p.translate(p.width / 2, p.height / 2);
+    p.rotate(p.radians(ROTATION_DEG));
+    p.translate(-p.width / 2, -p.height / 2);
+
+    // Línea divisoria central con la inclinación correcta
     p.stroke(BLACK);
-    p.strokeWeight(2);
-    p.rectMode(p.CORNER);
-    p.rect(p.width - s - 30, 30, s, s);
+    p.strokeWeight(6);
+    p.line(-p.width * 0.5, lineY, p.width * 1.5, lineY);
 
-    p.stroke(RED);
-    p.strokeWeight(1.5);
-    p.line(30, p.height - 30, 30 + s * 0.5, p.height - 30 - s * 0.5);
-
-    p.stroke(RED);
-    p.strokeWeight(2);
-    for (let k = 0; k < 6; k++) {
-      p.line(20 + k * 10, 18, 20 + k * 10, 66);
-    }
-    p.pop();
-  }
-
-  function updatePlay() {
-    for (const pt of particles) {
-      if (!pt.active) continue;
-
-      if (pt.isRed) {
-        pt.x = pt.homeX + p.sin(p.frameCount * 0.4 + pt.phase) * 2.2;
-        pt.y = pt.homeY + p.cos(p.frameCount * 0.35 + pt.phase) * 2.2;
-        continue;
-      }
-
-      if (pt.dragging) {
-        // la posición "cruda" (dedo/mouse) y la posición visual ya no son lo mismo:
-        // la visual persigue a la cruda + el empuje de repulsión con un lerp,
-        // así el empuje se siente elástico en vez de un salto brusco.
-        const desiredX = p.constrain(pt.dragTargetX, pt.r, p.width - pt.r);
-        const desiredY = p.constrain(pt.dragTargetY, pt.r, p.height - pt.r);
-        const f = repulsionForce(pt, desiredX, desiredY);
-        const targetX = p.constrain(desiredX + f.fx, pt.r, p.width - pt.r);
-        const targetY = p.constrain(desiredY + f.fy, pt.r, p.height - pt.r);
-        pt.x = p.lerp(pt.x, targetX, DRAG_EASE);
-        pt.y = p.lerp(pt.y, targetY, DRAG_EASE);
-      } else {
-        const f = repulsionForce(pt);
-        const wanderAngle = p.noise(pt.id * 17.3, p.frameCount * 0.004) * p.TWO_PI * 3;
-        pt.vx += p.cos(wanderAngle) * 0.035;
-        pt.vy += p.sin(wanderAngle) * 0.035;
-        pt.vx += f.fx * 0.05;
-        pt.vy += f.fy * 0.05;
-
-        const margin = 50;
-        if (pt.x < margin) pt.vx += 0.06;
-        if (pt.x > p.width - margin) pt.vx -= 0.06;
-        if (pt.y < margin) pt.vy += 0.06;
-        if (pt.y > p.height - margin) pt.vy -= 0.06;
-
-        pt.vx *= 0.94; pt.vy *= 0.94;
-        const speed = Math.hypot(pt.vx, pt.vy);
-        const maxSpeed = 0.9;
-        if (speed > maxSpeed) { pt.vx = (pt.vx / speed) * maxSpeed; pt.vy = (pt.vy / speed) * maxSpeed; }
-
-        pt.x = p.constrain(pt.x + pt.vx, pt.r, p.width - pt.r);
-        pt.y = p.constrain(pt.y + pt.vy, pt.r, p.height - pt.r);
-      }
-    }
-
-    updateConnections();
-  }
-
-  // atX/atY opcionales: evalúa la repulsión en una posición distinta a pt.x/pt.y
-  // (se usa mientras se arrastra, para calcular la fuerza en base a la posición
-  // objetivo cruda y no a la posición visual, que va un paso atrás).
-  function repulsionForce(pt, atX, atY) {
-    const x = atX !== undefined ? atX : pt.x;
-    const y = atY !== undefined ? atY : pt.y;
-    let fx = 0, fy = 0;
-    for (const src of particles) {
-      if (!src.active || !src.isRed || src.id === pt.id) continue;
-      const d = p.dist(x, y, src.x, src.y);
-      if (d < REPEL_RADIUS && d > 0.01) {
-        // antes era lineal (1 - d/REPEL_RADIUS): arrancaba de golpe apenas
-        // entraba al radio. Con la curva al cuadrado el empuje aparece
-        // gradualmente y se intensifica recién cerca del centro.
-        const t = 1 - d / REPEL_RADIUS;
-        const eased = t * t;
-        const factor = src.repulsionStrength * eased;
-        const ux = (x - src.x) / d, uy = (y - src.y) / d;
-        fx += ux * factor * REPEL_MAX_PUSH;
-        fy += uy * factor * REPEL_MAX_PUSH;
-      }
-    }
-    return { fx, fy };
-  }
-
-  function updateConnections() {
-    const nearestMap = {};
-    let simultaneous = 0;
-
-    for (const pt of particles) {
-      if (!pt.active || pt.isRed) continue;
-      let nearest = null, nearestD = Infinity;
-      for (const q of particles) {
-        if (!q.active || !q.isRed) continue;
-        const d = p.dist(pt.x, pt.y, q.x, q.y);
-        if (d < nearestD) { nearestD = d; nearest = q; }
-      }
-      nearestMap[pt.id] = { nearest, nearestD };
-      if (pt.dragging && nearest && nearestD < CONNECT_RADIUS) simultaneous++;
-    }
-
-    const multiplier = simultaneous > 0 ? Math.min(simultaneous, MAX_SPEED_MULT) : 1;
-
-    for (const pt of particles) {
-      if (!pt.active || pt.isRed) continue;
-      const { nearest, nearestD } = nearestMap[pt.id];
-
-      if (pt.dragging && nearest && nearestD < CONNECT_RADIUS) {
-        pt.connectProgress = p.min(1, pt.connectProgress + (p.deltaTime / GROW_MS) * multiplier);
-      } else {
-        pt.connectProgress = p.max(0, pt.connectProgress - p.deltaTime / DECAY_MS);
-      }
-
-      if (pt.connectProgress >= 1 && nearest) {
-        convertToRed(pt, nearest);
-      }
-    }
-  }
-
-  function randOffset(rad) {
-    const a = p.random(p.TWO_PI);
-    const m = p.random(rad * 0.3, rad * 0.85);
-    return { dx: p.cos(a) * m, dy: p.sin(a) * m };
-  }
-
-  function convertToRed(pt, target) {
-    const ang = p.atan2(pt.y - target.y, pt.x - target.x);
-    pt.homeX = p.constrain(target.x + p.cos(ang) * BOND_DISTANCE, pt.r, p.width - pt.r);
-    pt.homeY = p.constrain(target.y + p.sin(ang) * BOND_DISTANCE, pt.r, p.height - pt.r);
-    pt.x = pt.homeX;
-    pt.y = pt.homeY;
-    pt.isRed = true;
-    pt.dragging = false;
-    pt.connectProgress = 1;
-    pt.repulsionStrength = 0.5;
-    pt.phase = p.random(1000);
-
-    networkEdges.push([pt.id, target.id, randOffset(pt.r), randOffset(target.r)]);
-    target.repulsionStrength = p.max(0.15, target.repulsionStrength * 0.6);
-
-    const activeBlacks = particles.filter(q => q.active && !q.isRed).length;
-    if (activeBlacks === 0) {
-      phase = 'converge';
-      convergeStart = p.millis();
-    }
-  }
-
-  function updateConverge() {
-    const cx = p.width / 2, cy = p.height / 2;
-    for (const pt of particles) {
-      if (!pt.active) continue;
-      pt.x = p.lerp(pt.x, cx, 0.035);
-      pt.y = p.lerp(pt.y, cy, 0.035);
-    }
-    if (p.millis() - convergeStart > CONVERGE_DURATION) {
-      phase = 'fade';
-      fadeState = 'out';
-      fadeStart = p.millis();
-    }
-  }
-
-  function updateFade() {
-    const elapsed = p.millis() - fadeStart;
-    if (fadeState === 'out') {
-      fadeAlpha = p.map(p.constrain(elapsed, 0, FADE_DURATION), 0, FADE_DURATION, 0, 255);
-      if (elapsed >= FADE_DURATION) {
-        resetAll();
-        phase = 'fade';
-        fadeState = 'in';
-        fadeStart = p.millis();
-      }
-    } else if (fadeState === 'in') {
-      fadeAlpha = p.map(p.constrain(elapsed, 0, FADE_DURATION), 0, FADE_DURATION, 255, 0);
-      if (elapsed >= FADE_DURATION) {
-        phase = 'play';
-        fadeAlpha = 0;
-      }
-    }
-  }
-
-  function drawNetworkEdges() {
-    p.stroke(RED);
-    p.strokeWeight(2.5);
-    for (const [i, j, offA, offB] of networkEdges) {
-      const a = particles[i], b = particles[j];
-      if (!a || !b || !a.active || !b.active) continue;
-      p.line(a.x + offA.dx, a.y + offA.dy, b.x + offB.dx, b.y + offB.dy);
-    }
-  }
-
-  function drawParticles() {
-    p.noStroke();
-    for (const pt of particles) {
-      if (!pt.active) continue;
-      if (pt.isRed && phase === 'play') {
-        p.noFill();
-        p.stroke(RED);
-        p.strokeWeight(1);
-        p.circle(pt.x, pt.y, REPEL_RADIUS * 2 * 0.35);
-        p.noStroke();
-      }
-      const c = pt.isRed ? colRed : p.lerpColor(colBlack, colRed, pt.connectProgress);
-      p.fill(c);
-      drawShape(pt);
-    }
-  }
-
-  function drawShape(pt) {
-    p.push();
-    p.translate(pt.x, pt.y);
-    if (pt.shape === 'circle') {
-      p.circle(0, 0, pt.r * 2);
-    } else if (pt.shape === 'square') {
-      p.rotate(pt.rot);
-      p.rectMode(p.CENTER);
-      p.rect(0, 0, pt.r * 1.8, pt.r * 1.8);
+    if (phase === 'exiting') {
+      updateExit();
     } else {
-      p.rotate(pt.rot);
-      p.triangle(-pt.r, pt.r * 0.8, pt.r, pt.r * 0.8, 0, -pt.r);
+      updateLogic();
+    }
+    drawScene();
+
+    p.pop();
+  };
+
+  function updateLogic() {
+    // La figura roja tiembla levemente en su lugar
+    redShape.jitterX = (p.noise(1000, p.frameCount * 0.06) - 0.5) * 5;
+    redShape.jitterY = (p.noise(2000, p.frameCount * 0.06) - 0.5) * 5;
+
+    // La figura roja intenta alejarse levemente de las figuras negras,
+    // incluso cuando están lejos (mientras no esté asentada sobre la línea)
+    if (!redShape.settled) {
+      let pushX = 0, pushY = 0;
+      const REPEL_RADIUS = 230;
+      for (let pt of blackShapes) {
+        if (pt.settled) continue;
+        let dx = redShape.x - pt.x;
+        let dy = redShape.y - pt.y;
+        let d = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (d < REPEL_RADIUS) {
+          let strength = Math.pow(1 - d / REPEL_RADIUS, 2) * 3.2;
+          pushX += (dx / d) * strength;
+          pushY += (dy / d) * strength;
+        }
+      }
+      redShape.x += pushX;
+      redShape.y += pushY;
+      // No se aleja infinitamente: se mantiene dentro de su lado de la línea
+      if (redShape.y < lineY + redShape.r) redShape.y = lineY + redShape.r;
+    }
+
+    // Movimiento libre de las figuras negras (limitadas a su zona)
+    for (let pt of blackShapes) {
+      if (pt.settled) continue;
+
+      if (draggingPt !== pt) {
+        pt.x += pt.vx;
+        pt.y += pt.vy;
+
+        // Rebote y clamp estricto en los 4 bordes de su zona
+        if (pt.x < pt.r) {
+          pt.x = pt.r;
+          pt.vx *= -1;
+        }
+        if (pt.x > p.width - pt.r) {
+          pt.x = p.width - pt.r;
+          pt.vx *= -1;
+        }
+        if (pt.y < pt.r) {
+          pt.y = pt.r;
+          pt.vy *= -1;
+        }
+        if (pt.y > lineY - pt.r) {
+          pt.y = lineY - pt.r;
+          pt.vy *= -1;
+        }
+      }
+    }
+
+    // Si una figura negra está siendo arrastrada cruzando la línea (y > lineY)
+    if (draggingPt && !draggingPt.settled) {
+      if (draggingPt.y > lineY) {
+        // Aumenta el progreso de cambio de color (más rápido)
+        draggingPt.progress += 0.022;
+
+        if (draggingPt.progress >= 1) {
+          draggingPt.progress = 1;
+          draggingPt.settled = true;
+          draggingPt.y = lineY - 20;
+          draggingPt = null;
+        }
+      } else {
+        // Si la vuelve a subir antes de completar, pierde progreso
+        draggingPt.progress = Math.max(0, draggingPt.progress - 0.03);
+      }
+    } else {
+      // Descuento de progreso en figuras sueltas si no se sostienen
+      for (let pt of blackShapes) {
+        if (!pt.settled && draggingPt !== pt) {
+          pt.progress = Math.max(0, pt.progress - 0.02);
+        }
+      }
+    }
+
+    // La roja se acerca de a partes: cada figura negra completada suma
+    // aproximadamente 1/N del camino hacia la línea (un poco menos
+    // mientras la figura actual todavía se está arrastrando/coloreando)
+    if (!redShape.settled) {
+      const total = blackShapes.length;
+      const settledCount = blackShapes.filter(pt => pt.settled).length;
+      const active = (draggingPt && !draggingPt.settled && draggingPt.y > lineY) ? draggingPt : null;
+      const dragContribution = active ? active.progress * 0.85 : 0;
+      const fraction = Math.min((settledCount + dragContribution) / total, 0.97);
+
+      let targetY = p.lerp(redShape.baseY, lineY + 20, fraction);
+      let targetX = p.lerp(redShape.baseX, p.width / 2, fraction);
+
+      // Pequeño desvío hacia la figura negra activa, para que el
+      // acercamiento no sea una línea recta sino un poco curvo
+      if (active) {
+        const pull = 0.22;
+        targetX = p.lerp(targetX, active.x, pull);
+        targetY = p.lerp(targetY, active.y, pull * 0.6);
+      }
+
+      redShape.y = p.lerp(redShape.y, targetY, 0.04);
+      redShape.x = p.lerp(redShape.x, targetX, 0.04);
+
+      // Nunca debe cruzar al lado de las negras antes de tiempo
+      if (redShape.y < lineY + redShape.r) redShape.y = lineY + redShape.r;
+    }
+
+    // Cuando todas las figuras negras se completan, la roja llega al centro de la línea
+    let allSettled = blackShapes.every(pt => pt.settled);
+    if (allSettled) {
+      redShape.settled = true;
+      redShape.y = p.lerp(redShape.y, lineY + 20, 0.06);
+      redShape.x = p.lerp(redShape.x, p.width / 2, 0.06);
+
+      // Cuando la roja llegó a destino, arrancamos la salida por la diagonal
+      let dCenter = p.dist(redShape.x, redShape.y, p.width / 2, lineY + 20);
+      if (dCenter < 2) {
+        redShape.x = p.width / 2;
+        redShape.y = lineY + 20;
+        redShape.jitterX = 0;
+        redShape.jitterY = 0;
+        phase = 'exiting';
+      }
+    }
+  }
+
+  function updateExit() {
+    // Todas las figuras (negras asentadas + la roja) se deslizan
+    // en la misma dirección local X, que visualmente es la diagonal.
+    redShape.x += EXIT_SPEED;
+    for (let pt of blackShapes) {
+      pt.x += EXIT_SPEED;
+    }
+
+    let exitLimit = p.width * 1.3;
+    let allOut = redShape.x > exitLimit && blackShapes.every(pt => pt.x > exitLimit);
+    if (allOut) {
+      resetAll();
+    }
+  }
+
+  function drawScene() {
+    // Dibujar figura roja (con temblor)
+    p.noStroke();
+    p.fill(RED);
+    drawShapeObj({
+      ...redShape,
+      x: redShape.x + redShape.jitterX,
+      y: redShape.y + redShape.jitterY
+    });
+
+    // Dibujar figuras negras / transformándose
+    for (let pt of blackShapes) {
+      p.push();
+      let c = p.lerpColor(p.color(BLACK), p.color(RED), pt.progress);
+      p.fill(c);
+      drawShapeObj(pt);
+      p.pop();
+    }
+  }
+
+  function drawShapeObj(obj) {
+    p.push();
+    p.translate(obj.x, obj.y);
+    p.rotate(obj.rot || 0);
+    let s = obj.r * 2;
+    if (obj.shape === 'circle') {
+      p.circle(0, 0, s);
+    } else if (obj.shape === 'square') {
+      p.rectMode(p.CENTER);
+      p.rect(0, 0, s * 0.9, s * 0.9);
+    } else {
+      p.triangle(-obj.r, obj.r * 0.8, obj.r, obj.r * 0.8, 0, -obj.r);
     }
     p.pop();
   }
 
-  function findParticleAt(x, y) {
-    if (phase !== 'play') return null;
-    for (let i = particles.length - 1; i >= 0; i--) {
-      const pt = particles[i];
-      if (!pt.active || pt.isRed) continue;
-      if (p.dist(x, y, pt.x, pt.y) < pt.r + 14) return pt;
-    }
-    return null;
+  function toLocalCoords(x, y) {
+    let cx = p.width / 2, cy = p.height / 2;
+    let dx = x - cx, dy = y - cy;
+    let rotationRad = p.radians(ROTATION_DEG);
+    let cosA = Math.cos(-rotationRad), sinA = Math.sin(-rotationRad);
+    return {
+      x: dx * cosA - dy * sinA + cx,
+      y: dx * sinA + dy * cosA + cy
+    };
   }
-
-  p.touchStarted = () => {
-    for (const t of p.touches) {
-      const pt = findParticleAt(t.x, t.y);
-      if (pt) {
-        pt.dragging = true;
-        pt.dragTargetX = t.x;
-        pt.dragTargetY = t.y;
-        activeTouches[t.id] = pt.id;
-      }
-    }
-    return false;
-  };
-
-  p.touchMoved = () => {
-    for (const t of p.touches) {
-      const pid = activeTouches[t.id];
-      if (pid !== undefined) {
-        const pt = particles[pid];
-        pt.dragTargetX = t.x;
-        pt.dragTargetY = t.y;
-      }
-    }
-    return false;
-  };
-
-  p.touchEnded = () => {
-    const stillActive = {};
-    for (const t of p.touches) stillActive[t.id] = true;
-    for (const id in activeTouches) {
-      if (!stillActive[id]) {
-        const pt = particles[activeTouches[id]];
-        if (pt) pt.dragging = false;
-        delete activeTouches[id];
-      }
-    }
-    return false;
-  };
 
   function mouseInsideCanvas() {
     return p.mouseX >= 0 && p.mouseX <= p.width && p.mouseY >= 0 && p.mouseY <= p.height;
-}
+  }
 
   p.mousePressed = () => {
-    if (!mouseInsideCanvas()) return;
-    const pt = findParticleAt(p.mouseX, p.mouseY);
-    if (pt) {
-      pt.dragging = true;
-      pt.dragTargetX = p.mouseX;
-      pt.dragTargetY = p.mouseY;
-      activeTouches['mouse'] = pt.id;
+    if (phase !== 'interact' || !mouseInsideCanvas()) return;
+    let local = toLocalCoords(p.mouseX, p.mouseY);
+    for (let pt of blackShapes) {
+      if (!pt.settled && p.dist(local.x, local.y, pt.x, pt.y) < pt.r + 10) {
+        draggingPt = pt;
+        pt.originX = pt.x;
+        pt.originY = pt.y;
+        break;
+      }
     }
   };
+
   p.mouseDragged = () => {
-    const pid = activeTouches['mouse'];
-    if (pid !== undefined) {
-      const pt = particles[pid];
-      pt.dragTargetX = p.mouseX;
-      pt.dragTargetY = p.mouseY;
+    if (draggingPt) {
+      let localCoord = toLocalCoords(p.mouseX, p.mouseY);
+      draggingPt.x = localCoord.x;
+      draggingPt.y = localCoord.y;
     }
   };
+
   p.mouseReleased = () => {
-    const pid = activeTouches['mouse'];
-    if (pid !== undefined) {
-      const pt = particles[pid];
-      if (pt) pt.dragging = false;
-      delete activeTouches['mouse'];
+    if (draggingPt) {
+      // Si se suelta antes de cruzar la línea o antes de completar el progreso,
+      // la figura es "repelida": sale despedida hacia su lado en vez de
+      // teletransportarse al punto donde se la agarró.
+      if (draggingPt.y <= lineY || draggingPt.progress < 1) {
+        const speed = p.random(2.5, 4);
+        // Ángulo apuntando hacia arriba (alejándose de la línea) con variación
+        const angle = -p.HALF_PI + p.random(-0.7, 0.7);
+        draggingPt.vx = Math.cos(angle) * speed;
+        draggingPt.vy = Math.sin(angle) * speed;
+        draggingPt.progress = 0;
+
+        // Por si quedó del lado equivocado de la línea al soltarla
+        if (draggingPt.y > lineY - draggingPt.r) {
+          draggingPt.y = lineY - draggingPt.r - 1;
+        }
+      }
+      draggingPt = null;
     }
   };
 };
